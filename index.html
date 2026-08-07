@@ -181,6 +181,8 @@ en: {
   paceHint:"Each line is one exercise, card by card through the deck.",
   paceSetup:"Drawing a card and getting set took about {n} s, worked out from the deck itself and taken off before the reps are counted",
   paceOff:"{n} outside the scale",
+  exportSession:"Export this deck (JSON)", exportLast:"Export the last deck (JSON)",
+  exportedFile:"Saved as {f}", exportedBoth:"Saved as {f}, and copied to the clipboard",
   paceSlower:"Second half roughly {n}% slower", paceFaster:"Second half roughly {n}% faster", paceEven:"Steady all the way",
   undoCard:"Undo last card",
   readyLine:"Tap the deck when you\u2019re ready. The clock is running.",
@@ -233,6 +235,8 @@ sv: {
   paceHint:"Varje linje \u00e4r en \u00f6vning, kort f\u00f6r kort genom leken.",
   paceSetup:"Att dra kortet och komma i l\u00e4ge tog ca {n} s, skattat ur passet och bortdraget innan repsen r\u00e4knas",
   paceOff:"{n} utanf\u00f6r skalan",
+  exportSession:"Exportera passet (JSON)", exportLast:"Exportera senaste passet (JSON)",
+  exportedFile:"Sparad som {f}", exportedBoth:"Sparad som {f}, och kopierad till urklipp",
   paceSlower:"Andra halvan ca {n} % l\u00e5ngsammare", paceFaster:"Andra halvan ca {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
   undoCard:"\u00c5ngra senaste kortet",
   readyLine:"Tryck p\u00e5 leken n\u00e4r du \u00e4r redo. Klockan g\u00e5r.",
@@ -257,7 +261,7 @@ function defaultSettings(){
   return {jokers:0, jokerEx:"60 s plank", sound:true, lang:"en", cardStyle:"pips",
           exercises: DEFAULT_EX.map(a=>a.slice())};
 }
-let store = {programIndex:0, history:[], settings: defaultSettings()};
+let store = {programIndex:0, history:[], settings: defaultSettings(), lastSession:null};
 let active = null;
 let screen = "home";
 let current = null;
@@ -299,7 +303,8 @@ function load(){
       store = {
         programIndex: [0,1,2].includes(p.programIndex) ? p.programIndex : 0,
         history: Array.isArray(p.history) ? p.history : [],
-        settings: mergeSettings(p.settings)
+        settings: mergeSettings(p.settings),
+        lastSession: typeof p.lastSession==="string" ? p.lastSession : null
       };
       active = p.active || null;
       if(active && active.group) active = null; // group decks (removed feature) were never tracked
@@ -328,7 +333,8 @@ function load(){
 }
 function save(){
   try{
-    localStorage.setItem(KEY, JSON.stringify({programIndex:store.programIndex, history:store.history, settings:store.settings, active:active}));
+    localStorage.setItem(KEY, JSON.stringify({programIndex:store.programIndex, history:store.history,
+      settings:store.settings, lastSession:store.lastSession||null, active:active}));
   }catch(e){ console.error("Could not save", e); }
 }
 
@@ -539,14 +545,23 @@ function sessionPace(endEpoch){
     timed.push({n:i+1, s:card.s, v:card.v, dur:(to-from)/1000});
   }
   const cards = active.drawnCards.length;
-  if(!timed.length) return {reps:reps, rows:[], points:[], cards:cards, setup:0};
+  // every card as drawn, jokers included, for the export
+  const log = active.drawnCards.map((card,i)=>{
+    const from = active.drawnAt[i];
+    const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
+    return {n:i+1, suit:card.joker?null:card.s, reps:card.joker?0:card.v, at:from||null,
+            sec:(from!=null && to!=null && to>from) ? +((to-from)/1000).toFixed(2) : null};
+  });
+  const common = {cards:cards, log:log, ex:Object.assign({}, active.ex), jokerTask:active.jokerEx,
+                  start:active.startEpoch, end:endEpoch};
+  if(!timed.length) return Object.assign({reps:reps, rows:[], points:[], setup:0}, common);
   const fit = fitDeck(timed);
   const points = timed.map(c=>({n:c.n, s:c.s, spr:Math.max(0,(c.dur-fit.setup)/c.v)}));
   const rows = SUITS.filter(s=>timed.some(c=>c.s===s)).map(s=>({
     suit:s, ex:active.ex[s], cards:timed.filter(c=>c.s===s).length, perRep:fit.rate[s],
     reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)
   }));
-  return {reps:reps, rows:rows, points:points, cards:cards, setup:fit.setup};
+  return Object.assign({reps:reps, rows:rows, points:points, setup:fit.setup}, common);
 }
 function finishDeck(){
   if(!active) return;
@@ -557,6 +572,7 @@ function finishDeck(){
   const nextIdx = active.workoutIdx>=0 ? (active.workoutIdx+1)%3 : store.programIndex; // custom decks don't advance the cycle
   store = Object.assign({}, store, {programIndex:nextIdx, history:store.history.concat([entry])});
   active=null; lastResult=entry;
+  store.lastSession = lastPace ? sessionExportJSON() : null; // exportable until the next deck
   save(); screen="done"; render();
   sndFanfare();
   chipExplosion();
@@ -572,7 +588,7 @@ function endEarly(saveIt){
   save(); screen="home"; render();
 }
 function resetAll(){
-  store={programIndex:0, history:[], settings: defaultSettings()};
+  store={programIndex:0, history:[], settings: defaultSettings(), lastSession:null};
   active=null; current=null; rot=0; lastResult=null; lastPace=null; confirmReset=false; screen="home";
   try{ localStorage.removeItem(KEY); }catch(e){}
   render();
@@ -841,6 +857,11 @@ function optionsHTML(){
       + '<div id="datamsg" style="font-size:12px;color:var(--gold);margin-top:6px;min-height:16px">'+escapeHtml(dataMsg)+'</div>';
   }
 
+  if(store.lastSession){
+    h += '<button class="btn-secondary" style="margin-top:10px" onclick="exportLastSession()">'+t("exportLast")+'</button>'
+      + '<div id="lastmsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>';
+  }
+
   // Resetting everything belongs with the other rarely touched things
   if(store.history.length>0 || store.programIndex!==0 || active){
     if(!confirmReset){
@@ -1028,6 +1049,56 @@ function endZoneHTML(){
     + '<button onclick="setConfirmEnd(false)" style="border:1px solid rgba(246,241,227,.25);color:var(--muted)">'+t("keepGoing")+'</button>'
     + '</div></div>';
 }
+// The whole session as it was measured: the raw draw times first, the numbers we derived from
+// them second, so a re-analysis can disagree with us.
+function exportLastSession(){
+  if(!store.lastSession) return;
+  let when = "", letter = "X";
+  try{ const d = JSON.parse(store.lastSession); when = d.finishedAt.slice(0,10); letter = d.workout; }catch(e){}
+  exportSession(store.lastSession, "fulldeck-"+when+"-"+letter+".json", "lastmsg");
+}
+function sessionExportJSON(){
+  const p = lastPace, r = lastResult;
+  return JSON.stringify({
+    schema: "fulldeck.session.1",
+    exported: new Date().toISOString(),
+    workout: r.workout>=0 ? WORKOUTS[r.workout].letter : "custom",
+    tag: r.workout>=0 ? t("tag"+r.workout) : t("tagCustom"),
+    lang: store.settings.lang,
+    startedAt: new Date(p.start).toISOString(),
+    finishedAt: new Date(p.end).toISOString(),
+    durationSec: r.durationSec,
+    cardsTotal: r.cardsTotal, cardsDrawn: p.cards, reps: p.reps,
+    exercises: p.ex, jokerTask: p.jokerTask,
+    derived: {
+      setupSec: +p.setup.toFixed(2),
+      perRep: p.rows.reduce((o,row)=>{ o[row.suit] = +row.perRep.toFixed(3); return o; }, {})
+    },
+    cards: p.log
+  }, null, 1);
+}
+function exportSession(json, name, msgId){
+  json = json || sessionExportJSON();
+  name = name || ("fulldeck-" + new Date(lastPace.end).toISOString().slice(0,10)
+             + "-" + (lastResult.workout>=0 ? WORKOUTS[lastResult.workout].letter : "X") + ".json");
+  let saved = false;
+  try{
+    const url = URL.createObjectURL(new Blob([json], {type:"application/json"}));
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 10000);
+    saved = true;
+  }catch(e){}
+  const show = msg => { const el = document.getElementById(msgId||"pacemsg"); if(el) el.textContent = msg; };
+  show(saved ? t("exportedFile",{f:name}) : t("exported"));
+  const box = document.getElementById(msgId ? "" : "paceio");
+  if(box){ box.style.display = "block"; box.value = json; }   // also there to copy by hand
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(json)
+      .then(()=>show(t(saved ? "exportedBoth" : "copied", {f:name}))).catch(()=>{});
+  }
+}
 // one colour per suit, distinct against the felt; ordered like SUITS
 const PACE_COLORS = ["#9DB8A8","#E06055","#C9A227","#8F9FBC"];
 function paceBoxHTML(){
@@ -1096,6 +1167,9 @@ function paceBoxHTML(){
     + '</div>'
     + '<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4">'
     + t("paceSetup",{n:p.setup.toFixed(1)})+'. '+t("paceHint")+'</div>'
+    + '<button class="btn-secondary" style="margin-top:12px;font-size:14px" onclick="exportSession()">'+t("exportSession")+'</button>'
+    + '<div id="pacemsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>'
+    + '<textarea id="paceio" spellcheck="false" style="display:none;height:120px"></textarea>'
     + '</div>';
 }
 function doneHTML(){

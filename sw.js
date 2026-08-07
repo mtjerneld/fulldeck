@@ -1,6 +1,6 @@
 // Full Deck service worker — caches the app so it works fully offline.
 // Bump the version string whenever you upload a new index.html.
-const CACHE = "fulldeck-v24";
+const CACHE = "fulldeck-v25";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
