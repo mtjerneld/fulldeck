@@ -178,7 +178,8 @@ en: {
   cardsLeft:"Cards left", tapToDraw:"TAP TO DRAW",
   repsWord:"reps", repsLeftPerSuit:"Reps left per suit",
   paceTitle:"Seconds per rep", medianShort:"median",
-  paceHint:"One point per card, timed from the moment you drew it. Small cards read slower \u2014 the pause to take the card in is shared over fewer reps.",
+  paceHint:"Each line is one exercise, card by card through the deck.",
+  paceSetup:"Drawing a card and getting set took about {n} s, worked out from the deck itself and taken off before the reps are counted",
   paceOff:"{n} above the scale",
   paceSlower:"Second half {n}% slower", paceFaster:"Second half {n}% faster", paceEven:"Steady all the way",
   undoCard:"Undo last card",
@@ -229,7 +230,8 @@ sv: {
   cardsLeft:"Kort kvar", tapToDraw:"TRYCK H\u00c4R",
   repsWord:"reps", repsLeftPerSuit:"Reps kvar per f\u00e4rg",
   paceTitle:"Sekunder per rep", medianShort:"median",
-  paceHint:"En punkt per kort, m\u00e4tt fr\u00e5n att du drog det. Sm\u00e5 kort ser l\u00e5ngsammare ut \u2014 pausen f\u00f6r att l\u00e4sa kortet delas p\u00e5 f\u00e4rre reps.",
+  paceHint:"Varje linje \u00e4r en \u00f6vning, kort f\u00f6r kort genom leken.",
+  paceSetup:"Att dra kortet och komma i l\u00e4ge tog ca {n} s, skattat ur passet och bortdraget innan repsen r\u00e4knas",
   paceOff:"{n} utanf\u00f6r skalan",
   paceSlower:"Andra halvan {n} % l\u00e5ngsammare", paceFaster:"Andra halvan {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
   undoCard:"\u00c5ngra senaste kortet",
@@ -491,13 +493,29 @@ function median(a){
   const b = a.slice().sort((x,y)=>x-y), m = b.length>>1;
   return b.length%2 ? b[m] : (b[m-1]+b[m])/2;
 }
+// Every card costs a fixed amount before the work starts: drawing it, reading it, getting
+// into position. Fitting duration = setup + reps * perRep separates that from the reps, so a
+// two and a king of the same exercise become comparable. The slope is the median of the
+// pairwise slopes rather than a least squares fit, because a single unplanned rest would drag
+// a least squares line badly, and the deck gives us only thirteen cards per exercise.
+function fitCards(cards){
+  const flat = median(cards.map(c=>c.dur/c.v));
+  if(cards.length<5) return {setup:0, perRep:flat};
+  const slopes = [];
+  for(let i=0;i<cards.length;i++) for(let j=i+1;j<cards.length;j++)
+    if(cards[j].v!==cards[i].v) slopes.push((cards[j].dur-cards[i].dur)/(cards[j].v-cards[i].v));
+  if(!slopes.length) return {setup:0, perRep:flat};
+  const perRep = median(slopes);
+  if(perRep<=0) return {setup:0, perRep:flat}; // nothing sensible to subtract
+  const setup = Math.min(20, Math.max(0, median(cards.map(c=>c.dur - perRep*c.v))));
+  return {setup:setup, perRep:perRep};
+}
 // How long each card took, from the moment it was drawn until the next one was. The wait
 // before the very first draw is getting ready, not work, so it never counts. Jokers carry a
 // task rather than reps, so they sit out of the per-rep arithmetic.
 function sessionPace(endEpoch){
   if(!active || !Array.isArray(active.drawnAt)) return null;
-  const per = {}; SUITS.forEach(s=>{ per[s] = []; });
-  const points = [];
+  const timed = [];
   let reps = 0;
   for(let i=0; i<active.drawnCards.length; i++){
     const card = active.drawnCards[i];
@@ -506,16 +524,21 @@ function sessionPace(endEpoch){
     const from = active.drawnAt[i];
     const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
     if(from==null || to==null || to<=from) continue;
-    const spr = (to-from)/1000/card.v;
-    per[card.s].push(spr);
-    points.push({n:i+1, s:card.s, spr:spr});
+    timed.push({n:i+1, s:card.s, v:card.v, dur:(to-from)/1000});
   }
-  if(!points.length) return {reps:reps, rows:[], points:[]};
-  const rows = SUITS.filter(s=>per[s].length).map(s=>({
-    suit:s, ex:active.ex[s], cards:per[s].length, median:median(per[s]),
-    reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)
-  }));
-  return {reps:reps, rows:rows, points:points, cards:active.drawnCards.length};
+  const cards = active.drawnCards.length;
+  if(!timed.length) return {reps:reps, rows:[], points:[], cards:cards, setup:0};
+  const rows = [], points = [];
+  SUITS.forEach(s=>{
+    const mine = timed.filter(c=>c.s===s);
+    if(!mine.length) return;
+    const fit = fitCards(mine);
+    mine.forEach(c=>points.push({n:c.n, s:s, spr:Math.max(0,(c.dur-fit.setup)/c.v)}));
+    rows.push({suit:s, ex:active.ex[s], cards:mine.length, perRep:fit.perRep, setup:fit.setup,
+               reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)});
+  });
+  points.sort((a,b)=>a.n-b.n);
+  return {reps:reps, rows:rows, points:points, cards:cards, setup:median(rows.map(r=>r.setup))};
 }
 function finishDeck(){
   if(!active) return;
@@ -1013,32 +1036,31 @@ function paceBoxHTML(){
   let over = 0, g = '';
   g += '<line x1="'+padL+'" y1="'+yAt(mid).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+yAt(mid).toFixed(1)+'"'
      + ' stroke="rgba(246,241,227,.25)" stroke-dasharray="3 3" stroke-width="1"/>';
-  // a straight fit through the cards that fit the scale, so one long rest cannot tilt it
-  const fit = p.points.filter(q=>q.spr<=yMax);
-  if(fit.length>4){
-    const mx = fit.reduce((a,q)=>a+q.n,0)/fit.length, my = fit.reduce((a,q)=>a+q.spr,0)/fit.length;
-    let num=0, den=0;
-    fit.forEach(q=>{ num += (q.n-mx)*(q.spr-my); den += (q.n-mx)*(q.n-mx); });
-    const k = den ? num/den : 0;
-    g += '<line x1="'+xAt(1).toFixed(1)+'" y1="'+yAt(Math.max(0,k*(1-mx)+my)).toFixed(1)+'"'
-       + ' x2="'+xAt(p.cards).toFixed(1)+'" y2="'+yAt(Math.max(0,k*(p.cards-mx)+my)).toFixed(1)+'"'
-       + ' stroke="#F6F1E3" stroke-width="1.3" opacity=".5"/>';
-  }
   SUITS.forEach((s,i)=>{
-    p.points.filter(q=>q.s===s).forEach(q=>{
+    const pts = p.points.filter(q=>q.s===s);
+    if(!pts.length) return;
+    g += '<polyline fill="none" stroke="'+PACE_COLORS[i]+'" stroke-width="1.3" stroke-linejoin="round" opacity=".75" points="'
+       + pts.map(q=>xAt(q.n).toFixed(1)+','+yAt(q.spr).toFixed(1)).join(' ')+'"/>';
+    pts.forEach(q=>{
       if(q.spr>yMax) over++;
-      g += '<circle cx="'+xAt(q.n).toFixed(1)+'" cy="'+yAt(q.spr).toFixed(1)+'" r="2.2" fill="'+PACE_COLORS[i]+'"/>';
+      g += '<circle cx="'+xAt(q.n).toFixed(1)+'" cy="'+yAt(q.spr).toFixed(1)+'" r="2" fill="'+PACE_COLORS[i]+'"/>';
     });
   });
   g += '<text x="'+padL+'" y="'+(H-6)+'" font-size="8" fill="#9DB8A8">1</text>'
      + '<text x="'+(W-padR)+'" y="'+(H-6)+'" text-anchor="end" font-size="8" fill="#9DB8A8">'+p.cards+' '+t("cardsWord")+'</text>';
-  // first half against second, on medians, so the rest pause does not decide it
+  // First half against second, each exercise against itself. Comparing the halves as a whole
+  // would mostly measure which exercises the shuffle happened to deal late, not fatigue.
+  // Medians throughout, so an unplanned rest lands on one card without deciding the answer.
   const cut = Math.ceil(p.cards/2);
-  const early = p.points.filter(q=>q.n<=cut).map(q=>q.spr);
-  const late = p.points.filter(q=>q.n>cut).map(q=>q.spr);
+  const ratios = [];
+  SUITS.forEach(s=>{
+    const early = p.points.filter(q=>q.s===s && q.n<=cut).map(q=>q.spr);
+    const late = p.points.filter(q=>q.s===s && q.n>cut).map(q=>q.spr);
+    if(early.length>=3 && late.length>=3 && median(early)>0) ratios.push(median(late)/median(early));
+  });
   let drift = '';
-  if(early.length>2 && late.length>2){
-    const d = (median(late)/median(early) - 1) * 100;
+  if(ratios.length>=2){
+    const d = (median(ratios) - 1) * 100;
     drift = Math.abs(d)<3 ? t("paceEven")
           : t(d>0 ? "paceSlower" : "paceFaster", {n:Math.abs(d).toFixed(0)});
   }
@@ -1053,10 +1075,11 @@ function paceBoxHTML(){
     + p.rows.map(r=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
         + '<span style="font-size:16px;color:'+PACE_COLORS[SUITS.indexOf(r.suit)]+'">'+r.suit+'</span>'
         + '<span style="color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(r.ex)+'</span>'
-        + '<span class="slab" style="font-size:13px">'+r.median.toFixed(1)+'</span>'
+        + '<span class="slab" style="font-size:13px">'+r.perRep.toFixed(1)+'</span>'
         + '<span style="font-size:10px;color:var(--muted)">s/rep</span></div>').join('')
     + '</div>'
-    + '<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4">'+t("paceHint")+'</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4">'
+    + t("paceSetup",{n:p.setup.toFixed(1)})+'. '+t("paceHint")+'</div>'
     + '</div>';
 }
 function doneHTML(){
