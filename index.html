@@ -183,6 +183,7 @@ en: {
   paceTitle:"Seconds per rep", medianShort:"median",
   paceHint:"Each line is one exercise, card by card through the deck.",
   paceSetup:"Between the reps went about {n} s a card: drawing it, getting set, and catching your breath from the card before. Worked out from the deck itself and taken off before the reps are counted",
+  paceSameEx:"When the same exercise came up twice running you saved about {n} s of it, already standing in the position",
   paceRush:"You cut about {n} s of that in the second half — the finish was less standing about, not quicker reps",
   paceLinger:"That grew by about {n} s in the second half, which is rest between cards rather than slower reps",
   paceOff:"{n} outside the scale",
@@ -239,6 +240,7 @@ sv: {
   paceTitle:"Sekunder per rep", medianShort:"median",
   paceHint:"Varje linje \u00e4r en \u00f6vning, kort f\u00f6r kort genom leken.",
   paceSetup:"Mellan repsen gick ca {n} s per kort: dra kortet, komma i l\u00e4ge och h\u00e4mta andan efter kortet innan. Skattat ur passet och bortdraget innan repsen r\u00e4knas",
+  paceSameEx:"Kom samma \u00f6vning tv\u00e5 g\u00e5nger i rad sparade du ca {n} s av det, redan st\u00e5ende i positionen",
   paceRush:"Av det kapade du ca {n} s i andra halvan \u2014 slutkl\u00e4mmen var mindre stillast\u00e5ende, inte snabbare reps",
   paceLinger:"Det v\u00e4xte med ca {n} s i andra halvan, vilket \u00e4r vila mellan korten snarare \u00e4n l\u00e5ngsammare reps",
   paceOff:"{n} utanf\u00f6r skalan",
@@ -565,10 +567,31 @@ function fitDeck(cards){
       });
     }
   }
-  return {setup:setup, rec:rec, rate:rate};
+  // Two push-ups and then three more: you never leave the position, so there is nothing to
+  // set up and you simply rip them off. Those cards have a known-smaller cost, which makes
+  // them the one place in the deck where the rate can be read almost without a guess — and
+  // without allowing for it they come out below the price of drawing the card at all.
+  // The saving is measured as the gap between what a fresh exercise leaves over and what a
+  // continued one does, capped at the setup itself because it cannot save more than there
+  // was. Over simulated decks it finds 3.7 of a true 5, and where no such saving exists it
+  // finds 0.0 and leaves every other number where it was.
+  let cont = 0;
+  const same = cards.filter(c=>c.same), fresh = cards.filter(c=>!c.same);
+  if(same.length>=4 && fresh.length>=4){
+    const left = c => c.dur - setup - rec*c.prev - rate[c.s]*c.v;
+    cont = Math.min(setup, Math.max(0, median(fresh.map(left)) - median(same.map(left))));
+    if(cont>0) for(let pass=0; pass<3; pass++) SUITS.forEach(s=>{   // rates once more, discount allowed for
+      const mine = cards.filter(c=>c.s===s);
+      if(mine.length) rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-setup-rec*c.prev+(c.same?cont:0))/c.v)));
+    });
+  }
+  return {setup:setup, rec:rec, cont:cont, rate:rate};
 }
-// What a card owed before its first rep: getting set, plus recovering from the card before it.
-function cardOverhead(fit, card){ return fit.setup + fit.rec*card.prev; }
+// What a card owed before its first rep: getting set, plus recovering from the card before it,
+// less whatever was saved by already standing in the position.
+function cardOverhead(fit, card){
+  return Math.max(0, fit.setup + fit.rec*card.prev - (card.same ? fit.cont : 0));
+}
 // How long each card took, from the moment it was drawn until the next one was. The wait
 // before the very first draw is getting ready, not work, so it never counts. Jokers carry a
 // task rather than reps, so they sit out of the per-rep arithmetic.
@@ -602,7 +625,8 @@ function sessionPace(endEpoch){
     // reps on the card just finished — nothing to recover from before the first card, and a
     // joker's task is untimed work of unknown size, so neither one is charged
     const was = i>0 ? active.drawnCards[i-1] : null;
-    timed.push({n:i+1, s:card.s, v:card.v, prev:(was && !was.joker) ? was.v : 0, dur:(to-from)/1000});
+    timed.push({n:i+1, s:card.s, v:card.v, prev:(was && !was.joker) ? was.v : 0,
+                same:!!(was && !was.joker && was.s===card.s), dur:(to-from)/1000});
   }
   const cards = active.drawnCards.length;
   // every card as drawn, jokers included, for the export
@@ -616,7 +640,7 @@ function sessionPace(endEpoch){
                   start:active.startEpoch, end:endEpoch};
   const cut = Math.ceil(cards/2);
   if(!timed.length) return Object.assign({reps:reps, rows:[], points:[], cut:cut,
-                                          setup:0, sprint:0, fits:[]}, common);
+                                          setup:0, sprint:0, cont:0, fits:[]}, common);
   const early = timed.filter(c=>c.n<=cut), late = timed.filter(c=>c.n>cut);
   // under ten cards a side there is not enough to fit twice, so the deck stays one piece
   const split = early.length>=10 && late.length>=10;
@@ -632,8 +656,9 @@ function sessionPace(endEpoch){
   }));
   const ohAll = median(timed.map(c=>cardOverhead(fitFor(c), c)));
   const sprint = split ? median(late.map(c=>cardOverhead(fitB,c))) - median(early.map(c=>cardOverhead(fitA,c))) : 0;
+  const fits = split ? [fitA, fitB] : [fitA];
   return Object.assign({reps:reps, rows:rows, points:points, cut:cut, setup:ohAll, sprint:sprint,
-                        fits:split ? [fitA, fitB] : [fitA]}, common);
+                        cont:median(fits.map(f=>f.cont)), fits:fits}, common);
 }
 function finishDeck(){
   if(!active) return;
@@ -1148,6 +1173,7 @@ function sessionExportJSON(){
       halfCutAtCard: p.cut,
       // one per half of the deck, or a single entry when the deck was too short to split
       halves: p.fits.map(f=>({ setupSec:+f.setup.toFixed(2), recoverySecPerPrevRep:+f.rec.toFixed(3),
+                               sameExerciseSavingSec:+f.cont.toFixed(2),
                                perRep:SUITS.reduce((o,s)=>{ if(f.rate[s]!=null) o[s]=+f.rate[s].toFixed(3); return o; }, {}) })),
       perRep: p.rows.reduce((o,row)=>{ o[row.suit] = +row.perRep.toFixed(3); return o; }, {})
     },
@@ -1237,6 +1263,9 @@ function paceBoxHTML(){
   // there was less standing about between them. Same reasoning on the threshold.
   const sprint = Math.abs(p.sprint)>=4
     ? t(p.sprint<0 ? "paceRush" : "paceLinger", {n:Math.abs(p.sprint).toFixed(0)}) : '';
+  // Only worth a sentence once it is worth more than a second; below that it is arithmetic
+  // no one needs to read.
+  const cont = p.cont>=1 ? t("paceSameEx", {n:p.cont.toFixed(0)}) : '';
   return '<div class="panel" style="width:100%;text-align:left;margin-top:26px">'
     + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'
     + '<span class="eyebrow">'+t("paceTitle")+'</span>'
@@ -1254,6 +1283,7 @@ function paceBoxHTML(){
     + '<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4">'
     + t("paceSetup",{n:p.setup.toFixed(1)})+'. '
     + (sprint ? sprint+'. ' : '')
+    + (cont ? cont+'. ' : '')
     + t("paceHint")+'</div>'
     + '<button class="btn-secondary" style="margin-top:12px;font-size:14px" onclick="exportSession()">'+t("exportSession")+'</button>'
     + '<div id="pacemsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>'
