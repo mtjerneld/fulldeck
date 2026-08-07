@@ -54,7 +54,8 @@ textarea{font-family:monospace;font-size:11px;color:var(--cream);background:rgba
 .stat .l{font-size:11px;color:var(--muted)}
 .histrow{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(246,241,227,.08);font-size:13px}
 .linkbtn{color:var(--muted);font-size:13px;text-decoration:underline}
-.flip3d{transition:transform .45s cubic-bezier(.4,.1,.2,1);transform-style:preserve-3d;position:relative;width:220px;height:320px}
+.flip3d{transition:transform .45s cubic-bezier(.4,.1,.2,1);transform-style:preserve-3d;-webkit-transform-style:preserve-3d;
+  will-change:transform;position:relative;width:220px;height:320px}
 @media (prefers-reduced-motion:reduce){.flip3d{transition:none}}
 .cardface{position:absolute;inset:0;border-radius:16px;backface-visibility:hidden;-webkit-backface-visibility:hidden;box-shadow:0 12px 30px rgba(0,0,0,.45)}
 .cardback{background:#7E2A22;border:10px solid var(--cream);display:flex;align-items:center;justify-content:center}
@@ -62,18 +63,27 @@ textarea{font-family:monospace;font-size:11px;color:var(--cream);background:rgba
   background-image:repeating-linear-gradient(45deg,rgba(201,162,39,.5) 0 1px,transparent 1px 9px),repeating-linear-gradient(-45deg,rgba(201,162,39,.5) 0 1px,transparent 1px 9px)}
 .cardback .tag{position:relative;font-family:var(--slab);color:var(--gold);font-size:15px;background:#7E2A22;padding:6px 10px;border-radius:8px;border:1px solid rgba(201,162,39,.6)}
 .cardfront{background:var(--cream)}
-.corner{position:absolute;text-align:center;font-family:var(--slab);font-size:26px;line-height:1}
-.corner .s{font-family:var(--body);font-size:22px}
+.corner{position:absolute;text-align:center;font-family:var(--slab);font-size:28px;line-height:1}
+.corner .s{font-family:var(--body);font-size:25px}
 .corner.tl{top:8px;left:12px}
 .corner.br{bottom:8px;right:12px;transform:rotate(180deg)}
 .bigsuit{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:110px}
+.pipfield{position:absolute;top:58px;bottom:58px;left:66px;right:66px}
+.pip{position:absolute;font-size:56px;line-height:1;transform:translate(-50%,-50%)}
+.pip.inv{transform:translate(-50%,-50%) rotate(180deg)}
+.bigrank{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-family:var(--slab);line-height:1}
+.bigrank .pair{white-space:nowrap} /* inline, so both glyphs sit on one baseline */
+.bigrank .base{display:inline-block;width:0;height:0} /* zero-height probe: its top is the baseline */
+.bigrank .r{font-size:80px}
+.bigrank .u{font-family:var(--body);font-size:85px;line-height:0;margin-right:8px;position:relative}
 .jokerword{position:absolute;left:0;right:0;bottom:26px;text-align:center;font-family:var(--slab);font-size:20px;letter-spacing:4px}
-.courtwrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:38px 48px}
+.courtwrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:34px 46px}
 .courtwrap svg{width:100%;height:100%}
 .confirm{background:rgba(0,0,0,.3);border:1px solid rgba(246,241,227,.2);border-radius:12px;padding:12px;width:100%}
 .confirm .row{display:flex;gap:8px;margin-top:8px}
 .confirm button{flex:1;border-radius:8px;padding:8px;font-size:13px}
-.optrow{display:flex;align-items:center;gap:10px;margin-top:10px}
+.optrow{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
 .optrow label{font-size:13px;color:var(--muted);white-space:nowrap}
 .custominput{display:flex;align-items:center;gap:8px;margin-top:8px}
 .custominput .s{font-size:20px;width:24px;text-align:center}
@@ -92,10 +102,14 @@ textarea{font-family:monospace;font-size:11px;color:var(--cream);background:rgba
   .workinfo .callout{text-align:left;margin:0 0 18px;min-height:0}
   .workinfo #endzone{text-align:left !important}
   .flip3d{width:280px;height:407px}
-  .corner{font-size:32px}
-  .corner .s{font-size:27px}
+  .corner{font-size:36px}
+  .corner .s{font-size:31px}
   .bigsuit{font-size:140px}
   .jokerword{font-size:26px;bottom:34px}
+  .pipfield{top:74px;bottom:74px;left:84px;right:84px}
+  .pip{font-size:70px}
+  .bigrank .r{font-size:104px}
+  .bigrank .u{font-size:111px}
 }
 .chip{position:fixed;left:0;top:0;pointer-events:none;z-index:999;will-change:transform,opacity}
 .chip svg{width:100%;height:100%;filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))}
@@ -110,6 +124,8 @@ const KEY = "fulldeck:v1";
 const SUITS = ["\u2660","\u2665","\u2666","\u2663"]; // spade heart diamond club
 const RED_SUITS = new Set(["\u2665","\u2666"]);
 const JOKER_STAR = "\u2605";
+// the card turns edge-on about a third into the .45 s flip; with reduced motion there is no flip
+const HALF_FLIP = (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ? 0 : 150;
 const WORKOUTS = [
   {letter:"A", color:"#C9A227"},
   {letter:"B", color:"#8FBC9F"},
@@ -141,6 +157,8 @@ en: {
   jokersIn:"Jokers in deck", jokerTask:"Joker task",
   jokerHint:"Jokers are shuffled into every deck you start and get their own task instead of reps.",
   sound:"Sound effects", on:"On", off:"Off",
+  cardFace:"Card face", facePips:"Classic pips", faceBig:"Big rank",
+  cardFaceHint:"Classic shows the traditional pip patterns and court figures. Big rank shows a large \u2666 4 in the middle \u2014 easiest to read at arm\u2019s length.",
   language:"Language",
   editWorkouts:"Edit workouts",
   editDesc:"Change the four exercises in each workout. Applies from your next session.",
@@ -157,7 +175,9 @@ en: {
   reset:"Reset all statistics",
   resetConfirm:"Delete all history, times and cycle progress? This can\u2019t be undone.",
   deleteAll:"Delete everything",
-  cardsLeft:"Cards left", tapToDraw:"TAP TO DRAW", nextCard:"NEXT CARD",
+  cardsLeft:"Cards left", tapToDraw:"TAP TO DRAW",
+  repsWord:"reps", repsLeftPerSuit:"Reps left per suit",
+  undoCard:"Undo last card",
   readyLine:"Tap the deck when you\u2019re ready. The clock is running.",
   finishDeckBtn:"Finish deck \u2014 stop the clock",
   endEarly:"End workout early",
@@ -184,6 +204,8 @@ sv: {
   jokersIn:"Jokrar i leken", jokerTask:"Jokeruppgift",
   jokerHint:"Jokrar blandas in i varje kortlek du startar och f\u00e5r en egen uppgift ist\u00e4llet f\u00f6r reps.",
   sound:"Ljudeffekter", on:"P\u00e5", off:"Av",
+  cardFace:"Kortdesign", facePips:"Klassiska m\u00f6nster", faceBig:"Stor val\u00f6r",
+  cardFaceHint:"Klassisk visar traditionella f\u00e4rgm\u00f6nster och kl\u00e4dda kort. Stor val\u00f6r visar ett stort \u2666 4 mitt p\u00e5 kortet \u2014 l\u00e4ttast att l\u00e4sa p\u00e5 avst\u00e5nd.",
   language:"Spr\u00e5k",
   editWorkouts:"Redigera passen",
   editDesc:"\u00c4ndra de fyra \u00f6vningarna i varje pass. G\u00e4ller fr\u00e5n n\u00e4sta pass.",
@@ -200,7 +222,9 @@ sv: {
   reset:"Nollst\u00e4ll all statistik",
   resetConfirm:"Radera all historik, tider och cykelposition? Detta kan inte \u00e5ngras.",
   deleteAll:"Radera allt",
-  cardsLeft:"Kort kvar", tapToDraw:"TRYCK H\u00c4R", nextCard:"N\u00c4STA KORT",
+  cardsLeft:"Kort kvar", tapToDraw:"TRYCK H\u00c4R",
+  repsWord:"reps", repsLeftPerSuit:"Reps kvar per f\u00e4rg",
+  undoCard:"\u00c5ngra senaste kortet",
   readyLine:"Tryck p\u00e5 leken n\u00e4r du \u00e4r redo. Klockan g\u00e5r.",
   finishDeckBtn:"Avsluta leken \u2014 stoppa klockan",
   endEarly:"Avsluta i f\u00f6rtid",
@@ -220,7 +244,7 @@ function t(k, vars){
 
 // ---------- State ----------
 function defaultSettings(){
-  return {jokers:0, jokerEx:"60 s plank", sound:true, lang:"en",
+  return {jokers:0, jokerEx:"60 s plank", sound:true, lang:"en", cardStyle:"pips",
           exercises: DEFAULT_EX.map(a=>a.slice())};
 }
 let store = {programIndex:0, history:[], settings: defaultSettings()};
@@ -250,6 +274,7 @@ function mergeSettings(s){
     if(typeof s.jokerEx==="string" && s.jokerEx.trim()) base.jokerEx = s.jokerEx.trim().slice(0,40);
     if(typeof s.sound==="boolean") base.sound = s.sound;
     if(s.lang==="en"||s.lang==="sv") base.lang = s.lang;
+    if(s.cardStyle==="pips"||s.cardStyle==="big") base.cardStyle = s.cardStyle;
     if(validExercises(s.exercises)) base.exercises = s.exercises.map(w=>w.map(e=>e.trim().slice(0,40)));
   }
   return base;
@@ -278,9 +303,11 @@ function load(){
           }
         }
         if(active && !active.jokerEx) active.jokerEx = store.settings.jokerEx || "Joker task";
+        // sessions saved before undo existed only know the card on the table
+        if(active && !Array.isArray(active.drawnCards)) active.drawnCards = active.current ? [active.current] : [];
       }
       current = active && active.current ? active.current : null;
-      rot = current ? 180 : 0;
+      rot = current ? -180 : 0;
     }
   }catch(e){ console.error("Could not load saved data", e); }
 }
@@ -309,6 +336,16 @@ function elapsed(){ return active ? Math.max(0, Math.floor((Date.now()-active.st
 function suitColor(s, light){ return RED_SUITS.has(s) ? (light?"var(--suitred-lt)":"var(--suitred)") : (light?"var(--cream)":"var(--ink)"); }
 function entryMeta(e){ return e.workout>=0 ? WORKOUTS[e.workout] : {letter:"X", color:CUSTOM_COLOR}; }
 function exFor(i){ const m={}; SUITS.forEach((s,j)=>{ m[s]=store.settings.exercises[i][j]; }); return m; }
+function repsLeftPerSuit(){
+  const m={}; SUITS.forEach(s=>{ m[s]=0; });
+  if(!active) return m;
+  for(const c of active.deck) if(!c.joker) m[c.s] += c.v;
+  return m;
+}
+function totalRepsLeft(){
+  const m = repsLeftPerSuit();
+  return SUITS.reduce((sum,s)=>sum+m[s], 0);
+}
 function sessionTitle(){ return active.workoutIdx>=0 ? t("workoutN",{l:active.meta.letter}) : t("customDeck"); }
 function sessionTag(){ return active.workoutIdx>=0 ? t("tag"+active.workoutIdx) : t("tagCustom"); }
 function escapeHtml(x){
@@ -383,7 +420,7 @@ function beginSession(workoutIdx, meta, ex){
   const jokers = Math.max(0, Math.min(2, parseInt(store.settings.jokers,10)||0));
   const deck = buildDeck(jokers);
   active = {workoutIdx:workoutIdx, meta:meta, ex:ex, jokerEx:store.settings.jokerEx||"Joker task",
-            deck:deck, total:deck.length, drawn:0, startEpoch:Date.now(), current:null};
+            deck:deck, total:deck.length, drawn:0, drawnCards:[], startEpoch:Date.now(), current:null};
   current=null; rot=0; confirmEnd=false; animating=false; showCustom=false; showEditor=false; showData=false;
   save(); screen="workout"; render();
 }
@@ -405,17 +442,36 @@ function draw(){
   if(!active || animating || active.deck.length===0) return;
   animating=true;
   const next = active.deck[0];
-  active = Object.assign({}, active, {deck:active.deck.slice(1), drawn:active.drawn+1, current:next});
-  rot += 180;
-  const showB = ((rot/180)%2)===1; // odd half-turns show faceB, even show faceA
+  active = Object.assign({}, active, {deck:active.deck.slice(1), drawn:active.drawn+1,
+    drawnCards:(active.drawnCards||[]).concat([next]), current:next});
+  current = next;
+  flipCard(-180); // negative turns lead with the right edge: forward, the way a page turns
+  if(next.joker) sndJoker();
+}
+// The shared half-turn. Both directions must stay in step, so they share one body:
+// paint the incoming side before the turn starts — it is still facing away, so the new
+// card is never seen early and the old one never lingers into view — then turn.
+function flipCard(step){
+  rot += step;
+  paintFace(showingB());
   const flip = document.getElementById("flip");
   if(flip) flip.style.transform = "rotateY("+rot+"deg)";
   sndSnap();
-  if(next.joker) sndJoker();
-  setTimeout(()=>{ current=next; paintFace(showB); updateCallout(); }, 220);
+  setTimeout(updateCallout, HALF_FLIP);
   setTimeout(()=>{ animating=false; }, 460);
   updateCounters();
   save();
+}
+function canUndo(){ return !!(active && active.drawnCards && active.drawnCards.length>0); }
+function undoDraw(){
+  if(!active || animating || !canUndo()) return;
+  animating=true;
+  const back = active.drawnCards[active.drawnCards.length-1];      // card that goes home again
+  const prev = active.drawnCards[active.drawnCards.length-2] || null; // card that was showing before it
+  active = Object.assign({}, active, {deck:[back].concat(active.deck), drawn:Math.max(0,active.drawn-1),
+    drawnCards:active.drawnCards.slice(0,-1), current:prev});
+  current = prev;
+  flipCard(180); // back the way it came
 }
 function finishDeck(){
   if(!active) return;
@@ -453,6 +509,10 @@ function toggleData(v){ showData=v; dataMsg=""; render(); }
 function setJokers(v){ store.settings.jokers = parseInt(v,10)||0; save(); }
 function setJokerEx(v){ store.settings.jokerEx = v.trim() || "Joker task"; save(); }
 function setLang(l){ if(l==="en"||l==="sv"){ store.settings.lang=l; save(); render(); } }
+function setCardStyle(v){
+  if(v!=="pips" && v!=="big") return;
+  store.settings.cardStyle=v; save(); render();
+}
 function saveEx(w,j,v){
   v = v.trim().slice(0,40);
   store.settings.exercises[w][j] = v || DEFAULT_EX[w][j];
@@ -620,6 +680,10 @@ function homeHTML(){
     + '<div class="optrow"><label for="jokex">'+t("jokerTask")+'</label>'
     + '<input id="jokex" maxlength="40" value="'+escapeHtml(store.settings.jokerEx)+'" onchange="setJokerEx(this.value)" placeholder="60 s plank"></div>'
     + '<div style="font-size:12px;color:var(--muted);margin:8px 0 4px">'+t("jokerHint")+'</div>'
+    + '<div class="optrow"><label>'+t("cardFace")+'</label>'
+    + '<button class="pill '+(store.settings.cardStyle!=="big"?'sel':'')+'" onclick="setCardStyle(\'pips\')">'+t("facePips")+'</button>'
+    + '<button class="pill '+(store.settings.cardStyle==="big"?'sel':'')+'" onclick="setCardStyle(\'big\')">'+t("faceBig")+'</button></div>'
+    + '<div style="font-size:12px;color:var(--muted);margin:8px 0 4px">'+t("cardFaceHint")+'</div>'
     + '<div class="optrow"><label>'+t("sound")+'</label>'
     + '<button class="pill '+(store.settings.sound?'sel':'')+'" onclick="toggleSound()">'+(store.settings.sound?t("on"):t("off"))+'</button></div>'
     + '<div class="optrow"><label>'+t("language")+'</label>'
@@ -731,18 +795,22 @@ function chartSVG(completed){
 }
 
 function workoutHTML(){
+  // this markup always puts the back on faceA and the card on faceB, so the turn has to
+  // land on an odd half-turn for a drawn card to face the viewer
+  rot = current ? -180 : 0;
   return '<div class="workwrap">'
     + '<div style="width:100%;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
     + '<div><div class="eyebrow" style="font-size:11px">'+sessionTitle()+' \u00b7 '+sessionTag()+'</div>'
     + '<div class="slab" id="timer" style="font-size:26px">'+fmtTime(elapsed())+'</div></div>'
     + '<div style="text-align:right"><div class="eyebrow" style="font-size:11px">'+t("cardsLeft")+'</div>'
-    + '<div class="slab" id="cardsleft" style="font-size:26px;color:var(--gold)">'+active.deck.length+'</div></div></div>'
+    + '<div class="slab" id="cardsleft" style="font-size:26px;color:var(--gold)">'+active.deck.length+'</div>'
+    + '<div style="font-size:11px;color:var(--muted)"><span id="repsleft">'+totalRepsLeft()+' '+t("repsWord")+'</span></div></div></div>'
     + '<div style="width:100%;height:6px;border-radius:99px;background:rgba(0,0,0,.35);margin-bottom:22px">'
     + '<div id="progress" style="height:6px;border-radius:99px;background:var(--gold);transition:width .3s;width:'+((active.drawn/active.total)*100)+'%"></div></div>'
     + '<div class="workgrid">'
     + '<button class="noselect" onclick="draw()" aria-label="Draw next card" style="perspective:1200px;padding:0">'
     + '<div class="flip3d" id="flip" style="transform:rotateY('+rot+'deg)">'
-    + '<div class="cardface cardback" id="faceA"><div class="lattice"></div><div class="tag" id="backtag">'+(active.drawn===0?t("tapToDraw"):t("nextCard"))+'</div></div>'
+    + '<div class="cardface cardback" id="faceA"><div class="lattice"></div><div class="tag">'+t("tapToDraw")+'</div></div>'
     + '<div class="cardface cardfront" id="faceB" style="transform:rotateY(180deg)">'+cardFaceHTML()+'</div>'
     + '</div></button>'
     + '<div class="workinfo">'
@@ -759,7 +827,7 @@ function courtSVG(v, suit){
   const S = "#EFD9B4";
   const frame = '<rect x="3" y="3" width="94" height="134" rx="6" fill="none" stroke="'+P+'" stroke-width="2"/>'
     + '<rect x="7" y="7" width="86" height="126" rx="3" fill="none" stroke="'+G+'" stroke-width="1" opacity=".7"/>';
-  const chest = '<text x="50" y="112" font-size="15" fill="'+G+'" text-anchor="middle" font-family="sans-serif">'+suit+'</text>';
+  const chest = (y)=>'<text x="50" y="'+y+'" font-size="23" fill="'+G+'" text-anchor="middle" font-family="sans-serif">'+suit+'</text>';
   let fig = '';
   if(v===13){ // King
     fig = '<path d="M32 40 L32 26 L41 33 L50 20 L59 33 L68 26 L68 40 Z" fill="'+G+'" stroke="'+P+'" stroke-width="1.5"/>'
@@ -768,28 +836,51 @@ function courtSVG(v, suit){
       + '<circle cx="50" cy="57" r="13" fill="'+S+'" stroke="'+P+'" stroke-width="1.5"/>'
       + '<circle cx="45" cy="55" r="1.5" fill="'+P+'"/><circle cx="55" cy="55" r="1.5" fill="'+P+'"/>'
       + '<path d="M38 61 Q50 68 62 61 Q64 79 50 84 Q36 79 38 61 Z" fill="'+P+'"/>'
-      + '<path d="M23 118 Q25 94 38 88 L50 94 L62 88 Q75 94 77 118 Z" fill="'+P+'"/>'
-      + '<path d="M38 88 L50 94 L62 88" fill="none" stroke="'+G+'" stroke-width="2.4"/>' + chest;
+      + '<path d="M22 126 Q24 92 38 82 L50 88 L62 82 Q76 92 78 126 Z" fill="'+P+'"/>'
+      + '<path d="M38 82 L50 88 L62 82" fill="none" stroke="'+G+'" stroke-width="2.4"/>' + chest(115);
   } else if(v===12){ // Queen
     fig = '<circle cx="50" cy="58" r="16" fill="'+P+'"/>'
       + '<circle cx="50" cy="59" r="12" fill="'+S+'" stroke="'+P+'" stroke-width="1.2"/>'
-      + '<path d="M36 38 L42 29 L50 35 L58 29 L64 38 Z" fill="'+G+'" stroke="'+P+'" stroke-width="1.4"/>'
-      + '<circle cx="42" cy="27" r="1.8" fill="'+P+'"/><circle cx="58" cy="27" r="1.8" fill="'+P+'"/><circle cx="50" cy="33" r="1.6" fill="'+P+'"/>'
+      + '<path d="M39 45 L44 36 L50 42 L56 36 L61 45 Z" fill="'+G+'" stroke="'+P+'" stroke-width="1.4"/>'
+      + '<circle cx="44" cy="34" r="1.8" fill="'+P+'"/><circle cx="56" cy="34" r="1.8" fill="'+P+'"/><circle cx="50" cy="40" r="1.6" fill="'+P+'"/>'
       + '<circle cx="45" cy="57" r="1.4" fill="'+P+'"/><circle cx="55" cy="57" r="1.4" fill="'+P+'"/>'
       + '<path d="M46 65 Q50 68 54 65" fill="none" stroke="'+P+'" stroke-width="1.3" stroke-linecap="round"/>'
       + '<circle cx="36" cy="62" r="1.8" fill="'+G+'"/><circle cx="64" cy="62" r="1.8" fill="'+G+'"/>'
-      + '<path d="M24 118 Q27 94 40 89 L50 95 L60 89 Q73 94 76 118 Z" fill="'+P+'"/>'
-      + '<path d="M42 92 Q50 99 58 92" fill="none" stroke="'+G+'" stroke-width="2"/>' + chest;
+      + '<path d="M23 126 Q26 88 40 74 L50 80 L60 74 Q74 88 77 126 Z" fill="'+P+'"/>'
+      + '<path d="M42 77 Q50 84 58 77" fill="none" stroke="'+G+'" stroke-width="2"/>' + chest(115);
   } else { // Jack
-    fig = '<path d="M34 42 Q34 26 52 25 Q68 26 66 38 L61 43 Q50 36 38 45 Z" fill="'+P+'"/>'
-      + '<path d="M63 30 Q74 17 79 21 Q74 30 65 35 Z" fill="'+G+'" stroke="'+P+'" stroke-width="1.2"/>'
-      + '<circle cx="50" cy="57" r="12" fill="'+S+'" stroke="'+P+'" stroke-width="1.5"/>'
+    // head first, so the cap sits over the dome instead of the face cutting across it
+    fig = '<circle cx="50" cy="57" r="12" fill="'+S+'" stroke="'+P+'" stroke-width="1.5"/>'
+      + '<path d="M34 47 Q34 31 52 30 Q68 31 66 43 L59.3 49.4 A 12 12 0 0 0 39.6 51 Z" fill="'+P+'"/>'
+      + '<path d="M63 35 Q74 22 79 26 Q74 35 65 40 Z" fill="'+G+'" stroke="'+P+'" stroke-width="1.2"/>'
       + '<circle cx="45.5" cy="55" r="1.4" fill="'+P+'"/><circle cx="55" cy="55" r="1.4" fill="'+P+'"/>'
       + '<path d="M46 63 Q50 66 54 63" fill="none" stroke="'+P+'" stroke-width="1.3" stroke-linecap="round"/>'
-      + '<path d="M25 118 Q27 95 40 89 L50 94 L60 89 Q73 95 75 118 Z" fill="'+P+'"/>'
-      + '<path d="M40 89 L68 118 L59 118 L36 93 Z" fill="'+G+'" opacity=".95"/>' + chest;
+      + '<path d="M24 126 Q26 88 40 70 L50 76 L60 70 Q74 88 76 126 Z" fill="'+P+'"/>'
+      + '<path d="M37.1 74.1 L73 103 L74.6 112.4 L33.9 79.9 Z" fill="'+G+'" opacity=".95"/>' + chest(120);
   }
-  return '<svg viewBox="0 0 100 140" xmlns="http://www.w3.org/2000/svg">'+frame+fig+'</svg>';
+  // the figure is drawn small in the viewBox, so scale it up to fill the frame
+  return '<svg viewBox="0 0 100 140" xmlns="http://www.w3.org/2000/svg">'+frame
+    + '<g transform="translate(50 72) scale(1.05) translate(-50 -72)">'+fig+'</g></svg>';
+}
+// Traditional pip positions, in percent of the pip field: [x, y].
+// A pip below the middle is rotated 180 degrees, the way a real card is printed.
+const PIP_LAYOUT = {
+  2:[[50,0],[50,100]],
+  3:[[50,0],[50,50],[50,100]],
+  4:[[0,0],[100,0],[0,100],[100,100]],
+  5:[[0,0],[100,0],[50,50],[0,100],[100,100]],
+  6:[[0,0],[100,0],[0,50],[100,50],[0,100],[100,100]],
+  7:[[0,0],[100,0],[50,25],[0,50],[100,50],[0,100],[100,100]],
+  8:[[0,0],[100,0],[50,25],[0,50],[100,50],[50,75],[0,100],[100,100]],
+  9:[[0,0],[100,0],[0,33.3],[100,33.3],[50,50],[0,66.7],[100,66.7],[0,100],[100,100]],
+  10:[[0,0],[100,0],[50,16.7],[0,33.3],[100,33.3],[0,66.7],[100,66.7],[50,83.3],[0,100],[100,100]]
+};
+function pipsHTML(v, suit, col){
+  const pips = PIP_LAYOUT[v];
+  if(!pips) return '<div class="bigsuit" style="color:'+col+'">'+suit+'</div>';
+  return '<div class="pipfield" style="color:'+col+'">'
+    + pips.map(p=>'<span class="pip'+(p[1]>50?' inv':'')+'" style="left:'+p[0]+'%;top:'+p[1]+'%">'+suit+'</span>').join('')
+    + '</div>';
 }
 function cardFaceHTML(){
   if(!current) return '';
@@ -800,9 +891,18 @@ function cardFaceHTML(){
       + '<div class="jokerword" style="color:var(--suitred)">JOKER</div>';
   }
   const col = suitColor(current.s,false);
-  const center = (current.v>=11 && current.v<=13)
-    ? '<div class="courtwrap">'+courtSVG(current.v, current.s)+'</div>'
-    : '<div class="bigsuit" style="color:'+col+'">'+current.s+'</div>';
+  let center;
+  if(store.settings.cardStyle==="big"){
+    center = '<div class="bigrank" style="color:'+col+'"><span class="pair">'
+      + '<span class="u">'+current.s+'</span><span class="r">'+rankLabel(current.v)+'</span>'
+      + '<span class="base"></span></span></div>';
+  } else if(current.v>=11 && current.v<=13){
+    center = '<div class="courtwrap">'+courtSVG(current.v, current.s)+'</div>';
+  } else if(current.v===14){
+    center = '<div class="bigsuit" style="color:'+col+'">'+current.s+'</div>';
+  } else {
+    center = pipsHTML(current.v, current.s, col);
+  }
   return '<div class="corner tl" style="color:'+col+'">'+rankLabel(current.v)+'<div class="s">'+current.s+'</div></div>'
     + '<div class="corner br" style="color:'+col+'">'+rankLabel(current.v)+'<div class="s">'+current.s+'</div></div>'
     + center;
@@ -820,12 +920,21 @@ function bottomZoneHTML(){
   if(active.deck.length===0){
     return '<button class="btn-primary" style="padding:16px;font-size:20px" onclick="finishDeck()">'+t("finishDeckBtn")+'</button>';
   }
-  return '<div class="suitgrid" style="gap:6px">'
-    + SUITS.map(s=>'<div class="suitrow" style="padding:6px 10px;font-size:12px"><span style="font-size:16px;color:'+suitColor(s,true)+'">'+s+'</span><span style="color:var(--muted)">'+escapeHtml(active.ex[s])+'</span></div>').join('')
+  const left = repsLeftPerSuit();
+  return '<div class="eyebrow" style="font-size:10px;letter-spacing:1.5px;margin-bottom:6px">'+t("repsLeftPerSuit")+'</div>'
+    + '<div class="suitgrid" style="gap:6px">'
+    + SUITS.map(s=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
+        + '<span style="font-size:16px;color:'+suitColor(s,true)+'">'+s+'</span>'
+        + '<span style="color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(active.ex[s])+'</span>'
+        + '<span class="slab" style="font-size:14px">'+left[s]+'</span></div>').join('')
     + '</div>';
 }
 function endZoneHTML(){
-  if(!confirmEnd) return '<button class="linkbtn" onclick="setConfirmEnd(true)">'+t("endEarly")+'</button>';
+  if(!confirmEnd){
+    return (canUndo()?'<button class="linkbtn" onclick="undoDraw()">\u21b6 '+t("undoCard")+'</button>'
+        + '<span style="color:var(--muted);font-size:13px;margin:0 8px">\u00b7</span>':'')
+      + '<button class="linkbtn" onclick="setConfirmEnd(true)">'+t("endEarly")+'</button>';
+  }
   return '<div class="confirm"><div style="font-size:13px;text-align:center">'+t("endConfirm",{x:active.drawn, y:active.total})+'</div>'
     + '<div class="row">'
     + '<button onclick="endEarly(true)" style="background:rgba(246,241,227,.15);color:var(--cream)">'+t("saveUnfinished")+'</button>'
@@ -863,20 +972,62 @@ function render(){
     catch(e2){ root.innerHTML = '<div style="padding:40px;text-align:center">Something went wrong loading saved data.<br><br><button onclick="resetAll()" style="text-decoration:underline;color:#C9A227">Reset all data</button></div>'; }
   }
   if(screen==="workout" && active) acquireWake(); else releaseWake();
+  if(screen==="workout") centreBigRank(document.getElementById("faceB"));
 }
 function updateCounters(){
-  const cl=document.getElementById("cardsleft"), pr=document.getElementById("progress"), bt=document.getElementById("backtag"), bz=document.getElementById("bottomzone");
+  const cl=document.getElementById("cardsleft"), pr=document.getElementById("progress"), bz=document.getElementById("bottomzone");
+  const rl=document.getElementById("repsleft");
   if(cl) cl.textContent = active.deck.length;
+  if(rl) rl.textContent = totalRepsLeft()+" "+t("repsWord");
   if(pr) pr.style.width = ((active.drawn/active.total)*100)+"%";
-  if(bt) bt.textContent = t("nextCard");
-  if(bz && active.deck.length===0) bz.innerHTML = bottomZoneHTML();
+  if(bz) bz.innerHTML = bottomZoneHTML();
+  renderEndZone();
 }
+// odd half-turns show faceB, even show faceA — rot counts down, so compare on the magnitude
+function showingB(){ return (Math.abs(rot)/180)%2===1; }
 function paintFace(showB){
   const el = document.getElementById(showB ? "faceB" : "faceA");
   if(!el) return;
-  el.className = "cardface cardfront"; // converts the card back into a face on its first use
   el.style.transform = showB ? "rotateY(180deg)" : "";
+  if(!current){ // undone all the way back to the top of the deck
+    el.className = "cardface cardback";
+    el.innerHTML = '<div class="lattice"></div><div class="tag">'+t("tapToDraw")+'</div>';
+    return;
+  }
+  el.className = "cardface cardfront"; // converts the card back into a face on its first use
   el.innerHTML = cardFaceHTML();
+  centreBigRank(el);
+}
+// The rank is set in the app's own font, but no text font carries the suit symbols, so those
+// come from whatever the device falls back to — Noto on Android, Apple Symbols on iOS, another
+// on a desktop. Their side bearings and their height above the baseline all differ, so no fixed
+// offset can centre the pair everywhere. Measure the two glyphs as drawn and shift the pair
+// until its ink, rather than its glyph boxes, sits in the middle of the card.
+function centreBigRank(face){
+  const box = face && face.querySelector(".bigrank");
+  if(!box) return;
+  const u = box.querySelector(".u"), r = box.querySelector(".r"), base = box.querySelector(".base");
+  if(!u || !r || !base) return;
+  try{
+    const ctx = centreBigRank.ctx || (centreBigRank.ctx = document.createElement("canvas").getContext("2d"));
+    const ink = el => {
+      const s = getComputedStyle(el);
+      ctx.font = s.fontSize + " " + s.fontFamily;
+      const m = ctx.measureText(el.textContent);
+      return {left:m.actualBoundingBoxLeft||0, right:m.actualBoundingBoxRight||0,
+              asc:m.actualBoundingBoxAscent||0, desc:m.actualBoundingBoxDescent||0, adv:m.width};
+    };
+    const iu = ink(u), ir = ink(r);
+    // ink sits at [-left, +right] around each glyph's origin; the boxes are what flex centred
+    const dx = (ir.adv + iu.left - ir.right) / 2;
+    // sit the suit's ink on the baseline, wherever its font happens to draw it
+    u.style.top = (-iu.desc).toFixed(1) + "px";
+    // centre the band above the baseline; the queen's tail is left to hang, as a tail should
+    const band = Math.max(iu.asc + iu.desc, ir.asc);
+    // offsetTop is layout, not paint, so the card's own 3D turn does not disturb it
+    const dy = box.offsetHeight / 2 - (base.offsetTop - band / 2);
+    box.style.transform = "translate(" + dx.toFixed(1) + "px," + dy.toFixed(1) + "px)";
+  }catch(e){ /* no text metrics: the pair stays centred on its boxes */ }
 }
 function updateCallout(){ const el=document.getElementById("callout"); if(el) el.innerHTML = calloutHTML(); }
 function renderEndZone(){ const el=document.getElementById("endzone"); if(el) el.innerHTML = endZoneHTML(); }
@@ -896,6 +1047,13 @@ if("serviceWorker" in navigator){
 
 load();
 render();
+// the web font arrives after the first paint, and it changes the metrics we centred on
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(()=>{
+    centreBigRank(document.getElementById("faceA"));
+    centreBigRank(document.getElementById("faceB"));
+  }).catch(()=>{});
+}
 </script>
 </body>
 </html>
