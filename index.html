@@ -183,6 +183,7 @@ en: {
   paceTitle:"Seconds per rep", medianShort:"median",
   paceHint:"Each line is one exercise, card by card through the deck.",
   paceSetup:"Drawing a card and getting set took about {n} s, worked out from the deck itself and taken off before the reps are counted",
+  paceRecover:"Plus {r} s per rep on the card before — the rest after a big card is booked where it was earned",
   paceOff:"{n} outside the scale",
   exportSession:"Export this deck (JSON)", exportLast:"Export the last deck (JSON)",
   exportedFile:"Saved as {f}", exportedBoth:"Saved as {f}, and copied to the clipboard",
@@ -237,6 +238,7 @@ sv: {
   paceTitle:"Sekunder per rep", medianShort:"median",
   paceHint:"Varje linje \u00e4r en \u00f6vning, kort f\u00f6r kort genom leken.",
   paceSetup:"Att dra kortet och komma i l\u00e4ge tog ca {n} s, skattat ur passet och bortdraget innan repsen r\u00e4knas",
+  paceRecover:"Till det {r} s per rep p\u00e5 kortet innan \u2014 vilan efter ett stort kort bokf\u00f6rs d\u00e4r den uppstod",
   paceOff:"{n} utanf\u00f6r skalan",
   exportSession:"Exportera passet (JSON)", exportLast:"Exportera senaste passet (JSON)",
   exportedFile:"Sparad som {f}", exportedBoth:"Sparad som {f}, och kopierad till urklipp",
@@ -513,6 +515,14 @@ function median(a){
 // fitted for the whole deck and only the rate is fitted per exercise. Sharing it halves the
 // free parameters, and over simulated decks it cut the spread in the rates by a third: with a
 // setup per exercise the two traded against each other on thirteen points.
+//
+// Part of that fixed cost is not setup at all but recovery, and recovery is owed to the card
+// you have just finished, not the one in front of you. A three after a king carries someone
+// else's rest and reads as impossibly fast otherwise. So the cost is a flat part plus an
+// amount per rep on the previous card, fitted the same way. It is written as a straight line
+// while the real thing looks more like a step at the high cards, but over simulated decks the
+// line recovers most of what a step model does without having to guess where the step sits,
+// and when there is no such effect it fits zero and costs nothing.
 // Medians throughout, because a single unplanned rest would drag a least squares fit badly.
 function fitDeck(cards){
   const rate = {};
@@ -525,18 +535,25 @@ function fitDeck(cards){
     const guess = slopes.length ? median(slopes) : median(mine.map(c=>c.dur/c.v));
     rate[s] = guess>0 ? guess : median(mine.map(c=>c.dur/c.v));
   });
-  let setup = 0;
+  let setup = 0, rec = 0;
   if(cards.length>=8){
-    for(let pass=0; pass<3; pass++){          // settles well inside three rounds
-      setup = Math.min(25, Math.max(0, median(cards.map(c=>c.dur - rate[c.s]*c.v))));
+    for(let pass=0; pass<4; pass++){          // settles well inside four rounds
+      const left = cards.map(c=>({x:c.prev, y:c.dur - rate[c.s]*c.v}));
+      const slopes = [];
+      for(let i=0;i<left.length;i++) for(let j=i+1;j<left.length;j++)
+        if(left[j].x!==left[i].x) slopes.push((left[j].y-left[i].y)/(left[j].x-left[i].x));
+      rec = slopes.length ? Math.min(1.5, Math.max(0, median(slopes))) : 0;
+      setup = Math.min(25, Math.max(0, median(left.map(p=>p.y - rec*p.x))));
       SUITS.forEach(s=>{
         const mine = cards.filter(c=>c.s===s);
-        if(mine.length) rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-setup)/c.v)));
+        if(mine.length) rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-setup-rec*c.prev)/c.v)));
       });
     }
   }
-  return {setup:setup, rate:rate};
+  return {setup:setup, rec:rec, rate:rate};
 }
+// What a card owed before its first rep: getting set, plus recovering from the card before it.
+function cardOverhead(fit, card){ return fit.setup + fit.rec*card.prev; }
 // How long each card took, from the moment it was drawn until the next one was. The wait
 // before the very first draw is getting ready, not work, so it never counts. Jokers carry a
 // task rather than reps, so they sit out of the per-rep arithmetic.
@@ -551,7 +568,10 @@ function sessionPace(endEpoch){
     const from = active.drawnAt[i];
     const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
     if(from==null || to==null || to<=from) continue;
-    timed.push({n:i+1, s:card.s, v:card.v, dur:(to-from)/1000});
+    // reps on the card just finished — nothing to recover from before the first card, and a
+    // joker's task is untimed work of unknown size, so neither one is charged
+    const was = i>0 ? active.drawnCards[i-1] : null;
+    timed.push({n:i+1, s:card.s, v:card.v, prev:(was && !was.joker) ? was.v : 0, dur:(to-from)/1000});
   }
   const cards = active.drawnCards.length;
   // every card as drawn, jokers included, for the export
@@ -563,14 +583,14 @@ function sessionPace(endEpoch){
   });
   const common = {cards:cards, log:log, ex:Object.assign({}, active.ex), jokerTask:active.jokerEx,
                   start:active.startEpoch, end:endEpoch};
-  if(!timed.length) return Object.assign({reps:reps, rows:[], points:[], setup:0}, common);
+  if(!timed.length) return Object.assign({reps:reps, rows:[], points:[], setup:0, rec:0}, common);
   const fit = fitDeck(timed);
-  const points = timed.map(c=>({n:c.n, s:c.s, spr:Math.max(0,(c.dur-fit.setup)/c.v)}));
+  const points = timed.map(c=>({n:c.n, s:c.s, spr:Math.max(0,(c.dur-cardOverhead(fit,c))/c.v)}));
   const rows = SUITS.filter(s=>timed.some(c=>c.s===s)).map(s=>({
     suit:s, ex:active.ex[s], cards:timed.filter(c=>c.s===s).length, perRep:fit.rate[s],
     reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)
   }));
-  return Object.assign({reps:reps, rows:rows, points:points, setup:fit.setup}, common);
+  return Object.assign({reps:reps, rows:rows, points:points, setup:fit.setup, rec:fit.rec}, common);
 }
 function finishDeck(){
   if(!active) return;
@@ -1081,6 +1101,7 @@ function sessionExportJSON(){
     exercises: p.ex, jokerTask: p.jokerTask,
     derived: {
       setupSec: +p.setup.toFixed(2),
+      recoverySecPerPrevRep: +p.rec.toFixed(3),
       perRep: p.rows.reduce((o,row)=>{ o[row.suit] = +row.perRep.toFixed(3); return o; }, {})
     },
     cards: p.log
@@ -1175,7 +1196,9 @@ function paceBoxHTML(){
         + '<span style="font-size:10px;color:var(--muted)">s/rep</span></div>').join('')
     + '</div>'
     + '<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4">'
-    + t("paceSetup",{n:p.setup.toFixed(1)})+'. '+t("paceHint")+'</div>'
+    + t("paceSetup",{n:p.setup.toFixed(1)})+'. '
+    + (p.rec>=0.05 ? t("paceRecover",{r:p.rec.toFixed(2)})+'. ' : '')
+    + t("paceHint")+'</div>'
     + '<button class="btn-secondary" style="margin-top:12px;font-size:14px" onclick="exportSession()">'+t("exportSession")+'</button>'
     + '<div id="pacemsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>'
     + '<textarea id="paceio" spellcheck="false" style="display:none;height:120px"></textarea>'
