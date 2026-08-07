@@ -177,6 +177,10 @@ en: {
   deleteAll:"Delete everything",
   cardsLeft:"Cards left", tapToDraw:"TAP TO DRAW",
   repsWord:"reps", repsLeftPerSuit:"Reps left per suit",
+  paceTitle:"Seconds per rep", medianShort:"median",
+  paceHint:"One point per card, timed from the moment you drew it. Small cards read slower \u2014 the pause to take the card in is shared over fewer reps.",
+  paceOff:"{n} above the scale",
+  paceSlower:"Second half {n}% slower", paceFaster:"Second half {n}% faster", paceEven:"Steady all the way",
   undoCard:"Undo last card",
   readyLine:"Tap the deck when you\u2019re ready. The clock is running.",
   finishDeckBtn:"Finish deck \u2014 stop the clock",
@@ -224,6 +228,10 @@ sv: {
   deleteAll:"Radera allt",
   cardsLeft:"Kort kvar", tapToDraw:"TRYCK H\u00c4R",
   repsWord:"reps", repsLeftPerSuit:"Reps kvar per f\u00e4rg",
+  paceTitle:"Sekunder per rep", medianShort:"median",
+  paceHint:"En punkt per kort, m\u00e4tt fr\u00e5n att du drog det. Sm\u00e5 kort ser l\u00e5ngsammare ut \u2014 pausen f\u00f6r att l\u00e4sa kortet delas p\u00e5 f\u00e4rre reps.",
+  paceOff:"{n} utanf\u00f6r skalan",
+  paceSlower:"Andra halvan {n} % l\u00e5ngsammare", paceFaster:"Andra halvan {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
   undoCard:"\u00c5ngra senaste kortet",
   readyLine:"Tryck p\u00e5 leken n\u00e4r du \u00e4r redo. Klockan g\u00e5r.",
   finishDeckBtn:"Avsluta leken \u2014 stoppa klockan",
@@ -258,8 +266,10 @@ let confirmReset = false;
 let showCustom = false;
 let showEditor = false;
 let showData = false;
+let showOptions = false;
 let dataMsg = "";
 let lastResult = null;
+let lastPace = null;
 
 // ---------- Persistence (on-device) ----------
 function validExercises(x){
@@ -305,6 +315,9 @@ function load(){
         if(active && !active.jokerEx) active.jokerEx = store.settings.jokerEx || "Joker task";
         // sessions saved before undo existed only know the card on the table
         if(active && !Array.isArray(active.drawnCards)) active.drawnCards = active.current ? [active.current] : [];
+        // sessions from before we timed the draws have no times to show; null means unknown
+        if(active && (!Array.isArray(active.drawnAt) || active.drawnAt.length!==active.drawnCards.length))
+          active.drawnAt = active.drawnCards.map(()=>null);
       }
       current = active && active.current ? active.current : null;
       rot = current ? -180 : 0;
@@ -420,7 +433,7 @@ function beginSession(workoutIdx, meta, ex){
   const jokers = Math.max(0, Math.min(2, parseInt(store.settings.jokers,10)||0));
   const deck = buildDeck(jokers);
   active = {workoutIdx:workoutIdx, meta:meta, ex:ex, jokerEx:store.settings.jokerEx||"Joker task",
-            deck:deck, total:deck.length, drawn:0, drawnCards:[], startEpoch:Date.now(), current:null};
+            deck:deck, total:deck.length, drawn:0, drawnCards:[], drawnAt:[], startEpoch:Date.now(), current:null};
   current=null; rot=0; confirmEnd=false; animating=false; showCustom=false; showEditor=false; showData=false;
   save(); screen="workout"; render();
 }
@@ -443,7 +456,8 @@ function draw(){
   animating=true;
   const next = active.deck[0];
   active = Object.assign({}, active, {deck:active.deck.slice(1), drawn:active.drawn+1,
-    drawnCards:(active.drawnCards||[]).concat([next]), current:next});
+    drawnCards:(active.drawnCards||[]).concat([next]),
+    drawnAt:(active.drawnAt||[]).concat([Date.now()]), current:next});
   current = next;
   flipCard(-180); // negative turns lead with the right edge: forward, the way a page turns
   if(next.joker) sndJoker();
@@ -469,13 +483,44 @@ function undoDraw(){
   const back = active.drawnCards[active.drawnCards.length-1];      // card that goes home again
   const prev = active.drawnCards[active.drawnCards.length-2] || null; // card that was showing before it
   active = Object.assign({}, active, {deck:[back].concat(active.deck), drawn:Math.max(0,active.drawn-1),
-    drawnCards:active.drawnCards.slice(0,-1), current:prev});
+    drawnCards:active.drawnCards.slice(0,-1), drawnAt:(active.drawnAt||[]).slice(0,-1), current:prev});
   current = prev;
   flipCard(180); // back the way it came
+}
+function median(a){
+  const b = a.slice().sort((x,y)=>x-y), m = b.length>>1;
+  return b.length%2 ? b[m] : (b[m-1]+b[m])/2;
+}
+// How long each card took, from the moment it was drawn until the next one was. The wait
+// before the very first draw is getting ready, not work, so it never counts. Jokers carry a
+// task rather than reps, so they sit out of the per-rep arithmetic.
+function sessionPace(endEpoch){
+  if(!active || !Array.isArray(active.drawnAt)) return null;
+  const per = {}; SUITS.forEach(s=>{ per[s] = []; });
+  const points = [];
+  let reps = 0;
+  for(let i=0; i<active.drawnCards.length; i++){
+    const card = active.drawnCards[i];
+    if(card.joker) continue;
+    reps += card.v;
+    const from = active.drawnAt[i];
+    const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
+    if(from==null || to==null || to<=from) continue;
+    const spr = (to-from)/1000/card.v;
+    per[card.s].push(spr);
+    points.push({n:i+1, s:card.s, spr:spr});
+  }
+  if(!points.length) return {reps:reps, rows:[], points:[]};
+  const rows = SUITS.filter(s=>per[s].length).map(s=>({
+    suit:s, ex:active.ex[s], cards:per[s].length, median:median(per[s]),
+    reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)
+  }));
+  return {reps:reps, rows:rows, points:points, cards:active.drawnCards.length};
 }
 function finishDeck(){
   if(!active) return;
   const durationSec = Math.max(1, Math.round((Date.now()-active.startEpoch)/1000));
+  lastPace = sessionPace(Date.now()); // shown once on the done screen; never written to history
   const entry = {date:new Date().toISOString(), workout:active.workoutIdx, durationSec,
                  cardsDone:active.drawn, cardsTotal:active.total, completed:true};
   const nextIdx = active.workoutIdx>=0 ? (active.workoutIdx+1)%3 : store.programIndex; // custom decks don't advance the cycle
@@ -497,7 +542,7 @@ function endEarly(saveIt){
 }
 function resetAll(){
   store={programIndex:0, history:[], settings: defaultSettings()};
-  active=null; current=null; rot=0; lastResult=null; confirmReset=false; screen="home";
+  active=null; current=null; rot=0; lastResult=null; lastPace=null; confirmReset=false; screen="home";
   try{ localStorage.removeItem(KEY); }catch(e){}
   render();
 }
@@ -506,6 +551,7 @@ function setConfirmReset(v){ confirmReset=v; render(); }
 function toggleCustom(v){ showCustom=v; render(); }
 function toggleEditor(v){ showEditor=v; render(); }
 function toggleData(v){ showData=v; dataMsg=""; render(); }
+function toggleOptions(v){ showOptions=v; if(!v){ showEditor=false; showData=false; confirmReset=false; } render(); }
 function setJokers(v){ store.settings.jokers = parseInt(v,10)||0; save(); }
 function setJokerEx(v){ store.settings.jokerEx = v.trim() || "Joker task"; save(); }
 function setLang(l){ if(l==="en"||l==="sv"){ store.settings.lang=l; save(); render(); } }
@@ -671,6 +717,45 @@ function homeHTML(){
   }
   h += '</div>';
 
+  h += '</div><div>';
+
+  // Stats
+  h += '<div class="statgrid">'
+    + '<div class="stat"><div class="v">'+completed.length+'</div><div class="l">'+t("statDecks")+'</div></div>'
+    + '<div class="stat"><div class="v">'+(best?fmtTime(best):'\u2014')+'</div><div class="l">'+t("statBest")+'</div></div>'
+    + '<div class="stat"><div class="v">'+(completed.length*416)+'</div><div class="l">'+t("statReps")+'</div></div></div>';
+
+  // Chart
+  h += '<div class="panel"><div class="eyebrow" style="margin-bottom:8px">'+t("chartTitle")+'</div>' + chartSVG(completed)
+    + '<div style="display:flex;gap:14px;justify-content:center;margin-top:8px;flex-wrap:wrap">'
+    + WORKOUTS.map((w,i)=>'<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+w.color+';margin-right:4px"></span>'+t("workoutN",{l:w.letter})+'</span>').join('')
+    + '<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+CUSTOM_COLOR+';margin-right:4px"></span>'+t("tagCustom")+'</span>'
+    + '</div></div>';
+
+  // History
+  if(store.history.length>0){
+    h += '<div class="panel"><div class="eyebrow" style="margin-bottom:6px">'+t("history")+'</div>'
+      + store.history.slice().reverse().slice(0,8).map(x=>{
+          const m=entryMeta(x);
+          return '<div class="histrow" style="opacity:'+(x.completed?1:.5)+'">'
+            + '<span><span class="slab" style="color:'+m.color+';font-size:13px">'+m.letter+'</span>&nbsp; '
+            + new Date(x.date).toLocaleDateString(store.settings.lang==="sv"?"sv-SE":undefined)
+            + (x.completed?'':' <span style="color:var(--muted)">\u00b7 '+t("endedAt")+' '+x.cardsDone+'/'+(x.cardsTotal||52)+'</span>')
+            + '</span><span style="color:var(--muted)">'+fmtTime(x.durationSec)+'</span></div>';
+        }).join('')
+      + '</div>';
+  }
+
+  h += '</div></div>';
+
+  // Options last, behind a button: the box had grown tall and is the least interesting thing here
+  h += !showOptions
+    ? '<button class="btn-secondary" onclick="toggleOptions(true)">'+t("options")+'</button>'
+    : optionsHTML();
+  return h;
+}
+function optionsHTML(){
+  let h = '';
   // Options: jokers, sound, language, edit workouts, data
   h += '<div class="panel"><div class="eyebrow">'+t("options")+'</div>'
     + '<div class="optrow"><label for="jok">'+t("jokersIn")+'</label>'
@@ -724,42 +809,12 @@ function homeHTML(){
       + '</div>'
       + '<div id="datamsg" style="font-size:12px;color:var(--gold);margin-top:6px;min-height:16px">'+escapeHtml(dataMsg)+'</div>';
   }
-  h += '</div>';
 
-  h += '</div><div>';
-
-  // Stats
-  h += '<div class="statgrid">'
-    + '<div class="stat"><div class="v">'+completed.length+'</div><div class="l">'+t("statDecks")+'</div></div>'
-    + '<div class="stat"><div class="v">'+(best?fmtTime(best):'\u2014')+'</div><div class="l">'+t("statBest")+'</div></div>'
-    + '<div class="stat"><div class="v">'+(completed.length*416)+'</div><div class="l">'+t("statReps")+'</div></div></div>';
-
-  // Chart
-  h += '<div class="panel"><div class="eyebrow" style="margin-bottom:8px">'+t("chartTitle")+'</div>' + chartSVG(completed)
-    + '<div style="display:flex;gap:14px;justify-content:center;margin-top:8px;flex-wrap:wrap">'
-    + WORKOUTS.map((w,i)=>'<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+w.color+';margin-right:4px"></span>'+t("workoutN",{l:w.letter})+'</span>').join('')
-    + '<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+CUSTOM_COLOR+';margin-right:4px"></span>'+t("tagCustom")+'</span>'
-    + '</div></div>';
-
-  // History
-  if(store.history.length>0){
-    h += '<div class="panel"><div class="eyebrow" style="margin-bottom:6px">'+t("history")+'</div>'
-      + store.history.slice().reverse().slice(0,8).map(x=>{
-          const m=entryMeta(x);
-          return '<div class="histrow" style="opacity:'+(x.completed?1:.5)+'">'
-            + '<span><span class="slab" style="color:'+m.color+';font-size:13px">'+m.letter+'</span>&nbsp; '
-            + new Date(x.date).toLocaleDateString(store.settings.lang==="sv"?"sv-SE":undefined)
-            + (x.completed?'':' <span style="color:var(--muted)">\u00b7 '+t("endedAt")+' '+x.cardsDone+'/'+(x.cardsTotal||52)+'</span>')
-            + '</span><span style="color:var(--muted)">'+fmtTime(x.durationSec)+'</span></div>';
-        }).join('')
-      + '</div>';
-  }
-
-  // Reset
+  // Resetting everything belongs with the other rarely touched things
   if(store.history.length>0 || store.programIndex!==0 || active){
-    h += '<div style="text-align:center;margin-top:4px">';
     if(!confirmReset){
-      h += '<button class="linkbtn" onclick="setConfirmReset(true)">'+t("reset")+'</button>';
+      h += '<button class="btn-secondary" style="margin-top:10px;color:var(--suitred-lt);border-color:rgba(224,96,85,.45)"'
+        + ' onclick="setConfirmReset(true)">'+t("reset")+'</button>';
     } else {
       h += '<div class="confirm" style="border-color:rgba(192,86,74,.6);text-align:center">'
         + '<div style="font-size:13px">'+t("resetConfirm")+'</div>'
@@ -768,9 +823,9 @@ function homeHTML(){
         + '<button onclick="setConfirmReset(false)" style="border:1px solid rgba(246,241,227,.25);color:var(--muted)">'+t("cancel")+'</button>'
         + '</div></div>';
     }
-    h += '</div>';
   }
-  h += '</div></div>';
+  h += '<button class="btn-secondary" style="margin-top:12px" onclick="toggleOptions(false)">'+t("close")+'</button>';
+  h += '</div>';
   return h;
 }
 
@@ -942,6 +997,68 @@ function endZoneHTML(){
     + '<button onclick="setConfirmEnd(false)" style="border:1px solid rgba(246,241,227,.25);color:var(--muted)">'+t("keepGoing")+'</button>'
     + '</div></div>';
 }
+// one colour per suit, distinct against the felt; ordered like SUITS
+const PACE_COLORS = ["#9DB8A8","#E06055","#C9A227","#8F9FBC"];
+function paceBoxHTML(){
+  if(!lastPace || !lastPace.points.length) return '';
+  const p = lastPace;
+  const W=360, H=150, padL=8, padR=8, padT=16, padB=20;
+  const sorted = p.points.map(q=>q.spr).sort((a,b)=>a-b);
+  // a long rest lands on one card and would flatten everything else, so the scale follows
+  // the ninth decile and anything above it is drawn at the ceiling and counted
+  const yMax = Math.max(sorted[Math.floor(0.9*(sorted.length-1))]*1.25, 0.2);
+  const mid = median(sorted);
+  const xAt = n => padL + (p.cards>1 ? (n-1)/(p.cards-1) : 0.5) * (W-padL-padR);
+  const yAt = v => H-padB - Math.min(v,yMax)/yMax * (H-padT-padB);
+  let over = 0, g = '';
+  g += '<line x1="'+padL+'" y1="'+yAt(mid).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+yAt(mid).toFixed(1)+'"'
+     + ' stroke="rgba(246,241,227,.25)" stroke-dasharray="3 3" stroke-width="1"/>';
+  // a straight fit through the cards that fit the scale, so one long rest cannot tilt it
+  const fit = p.points.filter(q=>q.spr<=yMax);
+  if(fit.length>4){
+    const mx = fit.reduce((a,q)=>a+q.n,0)/fit.length, my = fit.reduce((a,q)=>a+q.spr,0)/fit.length;
+    let num=0, den=0;
+    fit.forEach(q=>{ num += (q.n-mx)*(q.spr-my); den += (q.n-mx)*(q.n-mx); });
+    const k = den ? num/den : 0;
+    g += '<line x1="'+xAt(1).toFixed(1)+'" y1="'+yAt(Math.max(0,k*(1-mx)+my)).toFixed(1)+'"'
+       + ' x2="'+xAt(p.cards).toFixed(1)+'" y2="'+yAt(Math.max(0,k*(p.cards-mx)+my)).toFixed(1)+'"'
+       + ' stroke="#F6F1E3" stroke-width="1.3" opacity=".5"/>';
+  }
+  SUITS.forEach((s,i)=>{
+    p.points.filter(q=>q.s===s).forEach(q=>{
+      if(q.spr>yMax) over++;
+      g += '<circle cx="'+xAt(q.n).toFixed(1)+'" cy="'+yAt(q.spr).toFixed(1)+'" r="2.2" fill="'+PACE_COLORS[i]+'"/>';
+    });
+  });
+  g += '<text x="'+padL+'" y="'+(H-6)+'" font-size="8" fill="#9DB8A8">1</text>'
+     + '<text x="'+(W-padR)+'" y="'+(H-6)+'" text-anchor="end" font-size="8" fill="#9DB8A8">'+p.cards+' '+t("cardsWord")+'</text>';
+  // first half against second, on medians, so the rest pause does not decide it
+  const cut = Math.ceil(p.cards/2);
+  const early = p.points.filter(q=>q.n<=cut).map(q=>q.spr);
+  const late = p.points.filter(q=>q.n>cut).map(q=>q.spr);
+  let drift = '';
+  if(early.length>2 && late.length>2){
+    const d = (median(late)/median(early) - 1) * 100;
+    drift = Math.abs(d)<3 ? t("paceEven")
+          : t(d>0 ? "paceSlower" : "paceFaster", {n:Math.abs(d).toFixed(0)});
+  }
+  return '<div class="panel" style="width:100%;text-align:left;margin-top:26px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'
+    + '<span class="eyebrow">'+t("paceTitle")+'</span>'
+    + '<span style="font-size:11px;color:var(--muted)">'+t("medianShort")+' '+mid.toFixed(1)+' s</span></div>'
+    + '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto" role="img" aria-label="'+t("paceTitle")+'">'+g+'</svg>'
+    + '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">'
+    + '<span>'+drift+'</span><span>'+(over?t("paceOff",{n:over}):'')+'</span></div>'
+    + '<div class="suitgrid" style="gap:6px;margin-top:10px">'
+    + p.rows.map(r=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
+        + '<span style="font-size:16px;color:'+PACE_COLORS[SUITS.indexOf(r.suit)]+'">'+r.suit+'</span>'
+        + '<span style="color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(r.ex)+'</span>'
+        + '<span class="slab" style="font-size:13px">'+r.median.toFixed(1)+'</span>'
+        + '<span style="font-size:10px;color:var(--muted)">s/rep</span></div>').join('')
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4">'+t("paceHint")+'</div>'
+    + '</div>';
+}
 function doneHTML(){
   const completed = store.history.filter(h=>h.completed);
   const best = completed.length ? Math.min.apply(null, completed.map(h=>h.durationSec)) : null;
@@ -953,9 +1070,10 @@ function doneHTML(){
   return '<div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding-top:40px">'
     + '<div style="font-size:60px">'+icon+'</div>'
     + '<div class="slab" style="font-size:30px;color:var(--gold);margin-top:8px">'+t("deckComplete")+'</div>'
-    + '<div style="color:var(--muted);font-size:14px;margin-bottom:24px">'+title+' \u00b7 '+(lastResult.cardsTotal||52)+' '+t("cardsWord")+' \u00b7 416 reps'+((lastResult.cardsTotal||52)>52?' + jokers':'')+'</div>'
+    + '<div style="color:var(--muted);font-size:14px;margin-bottom:24px">'+title+' \u00b7 '+(lastResult.cardsTotal||52)+' '+t("cardsWord")+' \u00b7 '+((lastPace&&lastPace.reps)||416)+' '+t("repsWord")+'</div>'
     + '<div class="slab" style="font-size:54px;line-height:1">'+fmtTime(lastResult.durationSec)+'</div>'
     + '<div style="color:var(--muted);font-size:13px;margin-top:6px">'+(isBest?t("newBest"):t("timeSaved"))+'</div>'
+    + paceBoxHTML()
     + '<div style="background:rgba(246,241,227,.06);border-radius:12px;padding:12px 16px;margin:32px 0 24px;font-size:14px">'+t("upNextShort")+' <span class="slab" style="color:'+nw.color+'">'+t("workoutN",{l:nw.letter})+'</span> \u00b7 '+t("tag"+store.programIndex)+'</div>'
     + '<button class="btn-primary" onclick="goHome()">'+t("back")+'</button>'
     + '</div>';
