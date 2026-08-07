@@ -41,8 +41,11 @@ textarea{font-family:monospace;font-size:11px;color:var(--cream);background:rgba
 .slab{font-family:var(--slab);font-weight:400}
 .panel{background:rgba(246,241,227,.06);border:1px solid rgba(246,241,227,.15);border-radius:16px;padding:18px;margin-bottom:14px}
 .eyebrow{color:var(--muted);font-size:12px;letter-spacing:2px;text-transform:uppercase}
-.suitrow{display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.25);border-radius:10px;padding:8px 10px;font-size:13px}
+.suitrow{display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.25);border-radius:10px;padding:8px 10px;font-size:13px;min-width:0}
+.suitrow .ex{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .suitgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.suitlist{display:grid;grid-template-columns:1fr;gap:6px}
+.suitgrid>*{min-width:0}
 .btn-primary{display:block;width:100%;border-radius:12px;padding:13px;font-family:var(--slab);font-size:18px;background:var(--gold);color:var(--ink)}
 .btn-primary:disabled{background:rgba(201,162,39,.3);color:rgba(34,32,28,.5);cursor:default}
 .btn-secondary{display:block;width:100%;border-radius:12px;padding:11px;font-family:var(--slab);font-size:15px;
@@ -177,6 +180,16 @@ en: {
   deleteAll:"Delete everything",
   cardsLeft:"Cards left", tapToDraw:"TAP TO DRAW",
   repsWord:"reps", repsLeftPerSuit:"Reps left per suit",
+  paceTitle:"Seconds per rep", medianShort:"median",
+  paceHint:"Each line is one exercise, card by card through the deck.",
+  paceSetup:"Between the reps went about {n} s a card: drawing it, getting set, and catching your breath from the card before. Worked out from the deck itself and taken off before the reps are counted",
+  paceSameEx:"When the same exercise came up twice running you saved about {n} s of it, already standing in the position",
+  paceRush:"You cut about {n} s of that in the second half — the finish was less standing about, not quicker reps",
+  paceLinger:"That grew by about {n} s in the second half, which is rest between cards rather than slower reps",
+  paceOff:"{n} outside the scale",
+  exportSession:"Export this deck (JSON)", exportLast:"Export the last deck (JSON)",
+  exportedFile:"Saved as {f}", exportedBoth:"Saved as {f}, and copied to the clipboard",
+  paceSlower:"Second half roughly {n}% slower", paceFaster:"Second half roughly {n}% faster", paceEven:"Steady all the way",
   undoCard:"Undo last card",
   readyLine:"Tap the deck when you\u2019re ready. The clock is running.",
   finishDeckBtn:"Finish deck \u2014 stop the clock",
@@ -224,6 +237,16 @@ sv: {
   deleteAll:"Radera allt",
   cardsLeft:"Kort kvar", tapToDraw:"TRYCK H\u00c4R",
   repsWord:"reps", repsLeftPerSuit:"Reps kvar per f\u00e4rg",
+  paceTitle:"Sekunder per rep", medianShort:"median",
+  paceHint:"Varje linje \u00e4r en \u00f6vning, kort f\u00f6r kort genom leken.",
+  paceSetup:"Mellan repsen gick ca {n} s per kort: dra kortet, komma i l\u00e4ge och h\u00e4mta andan efter kortet innan. Skattat ur passet och bortdraget innan repsen r\u00e4knas",
+  paceSameEx:"Kom samma \u00f6vning tv\u00e5 g\u00e5nger i rad sparade du ca {n} s av det, redan st\u00e5ende i positionen",
+  paceRush:"Av det kapade du ca {n} s i andra halvan \u2014 slutkl\u00e4mmen var mindre stillast\u00e5ende, inte snabbare reps",
+  paceLinger:"Det v\u00e4xte med ca {n} s i andra halvan, vilket \u00e4r vila mellan korten snarare \u00e4n l\u00e5ngsammare reps",
+  paceOff:"{n} utanf\u00f6r skalan",
+  exportSession:"Exportera passet (JSON)", exportLast:"Exportera senaste passet (JSON)",
+  exportedFile:"Sparad som {f}", exportedBoth:"Sparad som {f}, och kopierad till urklipp",
+  paceSlower:"Andra halvan ca {n} % l\u00e5ngsammare", paceFaster:"Andra halvan ca {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
   undoCard:"\u00c5ngra senaste kortet",
   readyLine:"Tryck p\u00e5 leken n\u00e4r du \u00e4r redo. Klockan g\u00e5r.",
   finishDeckBtn:"Avsluta leken \u2014 stoppa klockan",
@@ -247,7 +270,7 @@ function defaultSettings(){
   return {jokers:0, jokerEx:"60 s plank", sound:true, lang:"en", cardStyle:"pips",
           exercises: DEFAULT_EX.map(a=>a.slice())};
 }
-let store = {programIndex:0, history:[], settings: defaultSettings()};
+let store = {programIndex:0, history:[], settings: defaultSettings(), lastSession:null};
 let active = null;
 let screen = "home";
 let current = null;
@@ -258,8 +281,10 @@ let confirmReset = false;
 let showCustom = false;
 let showEditor = false;
 let showData = false;
+let showOptions = false;
 let dataMsg = "";
 let lastResult = null;
+let lastPace = null;
 
 // ---------- Persistence (on-device) ----------
 function validExercises(x){
@@ -287,7 +312,8 @@ function load(){
       store = {
         programIndex: [0,1,2].includes(p.programIndex) ? p.programIndex : 0,
         history: Array.isArray(p.history) ? p.history : [],
-        settings: mergeSettings(p.settings)
+        settings: mergeSettings(p.settings),
+        lastSession: typeof p.lastSession==="string" ? p.lastSession : null
       };
       active = p.active || null;
       if(active && active.group) active = null; // group decks (removed feature) were never tracked
@@ -305,6 +331,9 @@ function load(){
         if(active && !active.jokerEx) active.jokerEx = store.settings.jokerEx || "Joker task";
         // sessions saved before undo existed only know the card on the table
         if(active && !Array.isArray(active.drawnCards)) active.drawnCards = active.current ? [active.current] : [];
+        // sessions from before we timed the draws have no times to show; null means unknown
+        if(active && (!Array.isArray(active.drawnAt) || active.drawnAt.length!==active.drawnCards.length))
+          active.drawnAt = active.drawnCards.map(()=>null);
       }
       current = active && active.current ? active.current : null;
       rot = current ? -180 : 0;
@@ -313,7 +342,8 @@ function load(){
 }
 function save(){
   try{
-    localStorage.setItem(KEY, JSON.stringify({programIndex:store.programIndex, history:store.history, settings:store.settings, active:active}));
+    localStorage.setItem(KEY, JSON.stringify({programIndex:store.programIndex, history:store.history,
+      settings:store.settings, lastSession:store.lastSession||null, active:active}));
   }catch(e){ console.error("Could not save", e); }
 }
 
@@ -332,7 +362,9 @@ function fmtTime(sec){
   return h>0 ? h+":"+mm+":"+ss : m+":"+ss;
 }
 function fmtDate(iso){ const d=new Date(iso); return d.getDate()+"/"+(d.getMonth()+1); }
-function elapsed(){ return active ? Math.max(0, Math.floor((Date.now()-active.startEpoch)/1000)) : 0; }
+// The clock starts on the first card, not when the deck is dealt: choosing a workout,
+// putting the phone down and finding room on the floor is not part of the time.
+function elapsed(){ return active && active.startEpoch ? Math.max(0, Math.floor((Date.now()-active.startEpoch)/1000)) : 0; }
 function suitColor(s, light){ return RED_SUITS.has(s) ? (light?"var(--suitred-lt)":"var(--suitred)") : (light?"var(--cream)":"var(--ink)"); }
 function entryMeta(e){ return e.workout>=0 ? WORKOUTS[e.workout] : {letter:"X", color:CUSTOM_COLOR}; }
 function exFor(i){ const m={}; SUITS.forEach((s,j)=>{ m[s]=store.settings.exercises[i][j]; }); return m; }
@@ -420,7 +452,7 @@ function beginSession(workoutIdx, meta, ex){
   const jokers = Math.max(0, Math.min(2, parseInt(store.settings.jokers,10)||0));
   const deck = buildDeck(jokers);
   active = {workoutIdx:workoutIdx, meta:meta, ex:ex, jokerEx:store.settings.jokerEx||"Joker task",
-            deck:deck, total:deck.length, drawn:0, drawnCards:[], startEpoch:Date.now(), current:null};
+            deck:deck, total:deck.length, drawn:0, drawnCards:[], drawnAt:[], startEpoch:null, current:null};
   current=null; rot=0; confirmEnd=false; animating=false; showCustom=false; showEditor=false; showData=false;
   save(); screen="workout"; render();
 }
@@ -442,8 +474,11 @@ function draw(){
   if(!active || animating || active.deck.length===0) return;
   animating=true;
   const next = active.deck[0];
+  const now = Date.now();
   active = Object.assign({}, active, {deck:active.deck.slice(1), drawn:active.drawn+1,
-    drawnCards:(active.drawnCards||[]).concat([next]), current:next});
+    drawnCards:(active.drawnCards||[]).concat([next]),
+    drawnAt:(active.drawnAt||[]).concat([now]), current:next,
+    startEpoch:active.startEpoch || now}); // the first card is what starts the clock
   current = next;
   flipCard(-180); // negative turns lead with the right edge: forward, the way a page turns
   if(next.joker) sndJoker();
@@ -468,19 +503,180 @@ function undoDraw(){
   animating=true;
   const back = active.drawnCards[active.drawnCards.length-1];      // card that goes home again
   const prev = active.drawnCards[active.drawnCards.length-2] || null; // card that was showing before it
+  const kept = active.drawnCards.slice(0,-1);
   active = Object.assign({}, active, {deck:[back].concat(active.deck), drawn:Math.max(0,active.drawn-1),
-    drawnCards:active.drawnCards.slice(0,-1), current:prev});
+    drawnCards:kept, drawnAt:(active.drawnAt||[]).slice(0,-1), current:prev,
+    startEpoch:kept.length ? active.startEpoch : null}); // undoing the first card puts the clock back to zero
   current = prev;
   flipCard(180); // back the way it came
 }
+function median(a){
+  const b = a.slice().sort((x,y)=>x-y), m = b.length>>1;
+  return b.length%2 ? b[m] : (b[m-1]+b[m])/2;
+}
+// A card of two reps says far less about your pace than a king does, so wherever cards are
+// summarised they carry their reps as weight: the answer is the value at which half the reps
+// lie below. Pairs come in as [value, weight].
+function wmedian(pairs){
+  const b = pairs.slice().sort((p,q)=>p[0]-q[0]);
+  const total = b.reduce((t,p)=>t+p[1], 0);
+  let run = 0;
+  for(let i=0;i<b.length;i++){ run += b[i][1]; if(run >= total/2) return b[i][0]; }
+  return b.length ? b[b.length-1][0] : 0;
+}
+// Fitted over a stretch of the deck, not the whole of it: see sessionPace for why the halves
+// get one of these each.
+//
+// Every card costs a fixed amount before the work starts: drawing it, reading it, getting
+// into position. That cost belongs to the card rather than to the exercise, so one setup is
+// fitted for the whole stretch and only the rate is fitted per exercise. Sharing it halves the
+// free parameters, and over simulated decks it cut the spread in the rates by a third: with a
+// setup per exercise the two traded against each other on thirteen points.
+//
+// Part of that fixed cost is not setup at all but recovery, and recovery is owed to the card
+// you have just finished, not the one in front of you. A three after a king carries someone
+// else's rest and reads as impossibly fast otherwise. So the cost is a flat part plus an
+// amount per rep on the previous card, fitted the same way. It is written as a straight line
+// while the real thing looks more like a step at the high cards, but over simulated decks the
+// line recovers most of what a step model does without having to guess where the step sits,
+// and when there is no such effect it fits zero and costs nothing.
+// Medians throughout, because a single unplanned rest would drag a least squares fit badly.
+function fitDeck(cards){
+  const rate = {};
+  SUITS.forEach(s=>{
+    const mine = cards.filter(c=>c.s===s);
+    if(!mine.length) return;
+    const slopes = [];
+    for(let i=0;i<mine.length;i++) for(let j=i+1;j<mine.length;j++)
+      if(mine[j].v!==mine[i].v) slopes.push((mine[j].dur-mine[i].dur)/(mine[j].v-mine[i].v));
+    const guess = slopes.length ? median(slopes) : median(mine.map(c=>c.dur/c.v));
+    rate[s] = guess>0 ? guess : median(mine.map(c=>c.dur/c.v));
+  });
+  let setup = 0, rec = 0;
+  if(cards.length>=8){
+    for(let pass=0; pass<4; pass++){          // settles well inside four rounds
+      const left = cards.map(c=>({x:c.prev, y:c.dur - rate[c.s]*c.v}));
+      const slopes = [];
+      for(let i=0;i<left.length;i++) for(let j=i+1;j<left.length;j++)
+        if(left[j].x!==left[i].x) slopes.push((left[j].y-left[i].y)/(left[j].x-left[i].x));
+      rec = slopes.length ? Math.min(1.5, Math.max(0, median(slopes))) : 0;
+      setup = Math.min(25, Math.max(0, median(left.map(p=>p.y - rec*p.x))));
+      SUITS.forEach(s=>{
+        const mine = cards.filter(c=>c.s===s);
+        if(mine.length) rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-setup-rec*c.prev)/c.v)));
+      });
+    }
+  }
+  // The same-exercise saving is fitted at the deck level in sessionPace — it rides on a
+  // dozen cards, too few to split — and written back onto this fit there.
+  return {setup:setup, rec:rec, cont:0, rate:rate};
+}
+// What a card owed before its first rep: getting set, plus recovering from the card before it,
+// less whatever was saved by already standing in the position.
+function cardOverhead(fit, card){
+  return Math.max(0, fit.setup + fit.rec*card.prev - (card.same ? fit.cont : 0));
+}
+// How long each card took, from the moment it was drawn until the next one was. The wait
+// before the very first draw is getting ready, not work, so it never counts. Jokers carry a
+// task rather than reps, so they sit out of the per-rep arithmetic.
+//
+// The two halves are fitted separately, because towards the end you stop putting the phone
+// down between cards and simply rip through them. Charge that finish one overhead for the
+// whole deck and the last cards come out below the cost of drawing them: on a real deck a
+// four took 6.6 s in total and read as 0.04 s a rep. Worse, the shortfall lands in the drift
+// figure and is reported as legs getting faster.
+//
+// Letting the cost slide over the deck as one fit was tried first and is the wrong shape: an
+// additive slide and a multiplicative fatigue compete for the same evidence, and over
+// simulated decks the slide swallowed roughly twelve points of real fatigue every time, even
+// when there was no finish to find. Fitting the halves apart asks the two questions
+// separately — did the standing around change, did the reps change — and over five different
+// simulated truths, with and without a finish, both answers came back straight.
+//
+// It is bought with precision: half the cards behind each number. The drift is only worth
+// printing past twenty per cent, which is where the false alarms fall to one deck in ten.
+function sessionPace(endEpoch){
+  if(!active || !Array.isArray(active.drawnAt)) return null;
+  const timed = [];
+  let reps = 0;
+  for(let i=0; i<active.drawnCards.length; i++){
+    const card = active.drawnCards[i];
+    if(card.joker) continue;
+    reps += card.v;
+    const from = active.drawnAt[i];
+    const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
+    if(from==null || to==null || to<=from) continue;
+    // reps on the card just finished — nothing to recover from before the first card, and a
+    // joker's task is untimed work of unknown size, so neither one is charged
+    const was = i>0 ? active.drawnCards[i-1] : null;
+    timed.push({n:i+1, s:card.s, v:card.v, prev:(was && !was.joker) ? was.v : 0,
+                same:!!(was && !was.joker && was.s===card.s), dur:(to-from)/1000});
+  }
+  const cards = active.drawnCards.length;
+  // every card as drawn, jokers included, for the export
+  const log = active.drawnCards.map((card,i)=>{
+    const from = active.drawnAt[i];
+    const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
+    return {n:i+1, suit:card.joker?null:card.s, reps:card.joker?0:card.v, at:from||null,
+            sec:(from!=null && to!=null && to>from) ? +((to-from)/1000).toFixed(2) : null};
+  });
+  const common = {cards:cards, log:log, ex:Object.assign({}, active.ex), jokerTask:active.jokerEx,
+                  start:active.startEpoch, end:endEpoch};
+  const cut = Math.ceil(cards/2);
+  if(!timed.length) return Object.assign({reps:reps, rows:[], points:[], cut:cut,
+                                          setup:0, sprint:0, cont:0, fits:[]}, common);
+  const early = timed.filter(c=>c.n<=cut), late = timed.filter(c=>c.n>cut);
+  // under ten cards a side there is not enough to fit twice, so the deck stays one piece
+  const split = early.length>=10 && late.length>=10;
+  const fitA = fitDeck(split ? early : timed);
+  const fitB = split ? fitDeck(late) : fitA;
+  const fitFor = c => (split && c.n>cut) ? fitB : fitA;
+  const fits = split ? [fitA, fitB] : [fitA];
+  const parts = split ? [early, late] : [timed];
+  // Two push-ups and then three more: you never leave the position, so there is nothing to
+  // set up and you simply rip them off. Without allowing for that, those cards come out
+  // below the price of drawing the card at all. The saving is the gap between what a fresh
+  // exercise leaves over and what a continued one does, capped at the setup because it
+  // cannot save more than there was. Unlike the standing about, which demonstrably changes
+  // over the deck, being already in position does not — so this is one number for the whole
+  // deck, pooled across both halves' residuals: only a dozen cards a deck carry it, and six
+  // a side found 2.7 of a true 5 where the pool finds 3.7. Where no saving exists it finds
+  // 0.0 and every other number stays where it was.
+  const sameC = timed.filter(c=>c.same), freshC = timed.filter(c=>!c.same);
+  if(sameC.length>=4 && freshC.length>=4){
+    const left = c => { const f=fitFor(c); return c.dur - f.setup - f.rec*c.prev - f.rate[c.s]*c.v; };
+    const cont = Math.min(Math.min.apply(null, fits.map(f=>f.setup)),
+                          Math.max(0, median(freshC.map(left)) - median(sameC.map(left))));
+    if(cont>0) fits.forEach((f,i)=>{
+      f.cont = cont;
+      SUITS.forEach(s=>{                       // rates once more, discount allowed for
+        const mine = parts[i].filter(c=>c.s===s);
+        if(mine.length) f.rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-f.setup-f.rec*c.prev+(c.same?cont:0))/c.v)));
+      });
+    });
+  }
+  const points = timed.map(c=>({n:c.n, s:c.s, v:c.v,
+    spr:Math.max(0,(c.dur-cardOverhead(fitFor(c),c))/c.v)}));
+  const rows = SUITS.filter(s=>timed.some(c=>c.s===s)).map(s=>({
+    suit:s, ex:active.ex[s], cards:timed.filter(c=>c.s===s).length,
+    perRep:wmedian(points.filter(p=>p.s===s).map(p=>[p.spr, p.v])),
+    reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)
+  }));
+  const ohAll = median(timed.map(c=>cardOverhead(fitFor(c), c)));
+  const sprint = split ? median(late.map(c=>cardOverhead(fitB,c))) - median(early.map(c=>cardOverhead(fitA,c))) : 0;
+  return Object.assign({reps:reps, rows:rows, points:points, cut:cut, setup:ohAll, sprint:sprint,
+                        cont:fits[0].cont, fits:fits}, common);
+}
 function finishDeck(){
   if(!active) return;
-  const durationSec = Math.max(1, Math.round((Date.now()-active.startEpoch)/1000));
+  const durationSec = Math.max(1, elapsed());
+  lastPace = sessionPace(Date.now()); // shown once on the done screen; never written to history
   const entry = {date:new Date().toISOString(), workout:active.workoutIdx, durationSec,
                  cardsDone:active.drawn, cardsTotal:active.total, completed:true};
   const nextIdx = active.workoutIdx>=0 ? (active.workoutIdx+1)%3 : store.programIndex; // custom decks don't advance the cycle
   store = Object.assign({}, store, {programIndex:nextIdx, history:store.history.concat([entry])});
   active=null; lastResult=entry;
+  store.lastSession = (lastPace && lastPace.start) ? sessionExportJSON() : null; // exportable until the next deck
   save(); screen="done"; render();
   sndFanfare();
   chipExplosion();
@@ -488,7 +684,7 @@ function finishDeck(){
 function endEarly(saveIt){
   if(!active) return;
   if(saveIt && active.drawn>0){
-    const durationSec = Math.max(1, Math.round((Date.now()-active.startEpoch)/1000));
+    const durationSec = Math.max(1, elapsed());
     store = Object.assign({}, store, {history:store.history.concat([{date:new Date().toISOString(), workout:active.workoutIdx,
       durationSec, cardsDone:active.drawn, cardsTotal:active.total, completed:false}])});
   }
@@ -496,8 +692,8 @@ function endEarly(saveIt){
   save(); screen="home"; render();
 }
 function resetAll(){
-  store={programIndex:0, history:[], settings: defaultSettings()};
-  active=null; current=null; rot=0; lastResult=null; confirmReset=false; screen="home";
+  store={programIndex:0, history:[], settings: defaultSettings(), lastSession:null};
+  active=null; current=null; rot=0; lastResult=null; lastPace=null; confirmReset=false; screen="home";
   try{ localStorage.removeItem(KEY); }catch(e){}
   render();
 }
@@ -506,6 +702,7 @@ function setConfirmReset(v){ confirmReset=v; render(); }
 function toggleCustom(v){ showCustom=v; render(); }
 function toggleEditor(v){ showEditor=v; render(); }
 function toggleData(v){ showData=v; dataMsg=""; render(); }
+function toggleOptions(v){ showOptions=v; if(!v){ showEditor=false; showData=false; confirmReset=false; } render(); }
 function setJokers(v){ store.settings.jokers = parseInt(v,10)||0; save(); }
 function setJokerEx(v){ store.settings.jokerEx = v.trim() || "Joker task"; save(); }
 function setLang(l){ if(l==="en"||l==="sv"){ store.settings.lang=l; save(); render(); } }
@@ -648,7 +845,7 @@ function homeHTML(){
     + '<span class="eyebrow">'+t("upNext")+'</span>'
     + '<span class="slab" style="font-size:22px;color:'+nw.color+'">'+nw.letter+' <span style="font-family:var(--body);font-size:13px;color:var(--muted)">\u00b7 '+t("tag"+store.programIndex)+'</span></span></div>'
     + '<div class="suitgrid" style="margin-bottom:14px">'
-    + SUITS.map(s=>'<div class="suitrow"><span style="font-size:20px;color:'+suitColor(s,true)+'">'+s+'</span><span>'+escapeHtml(nwEx[s])+'</span></div>').join('')
+    + SUITS.map(s=>'<div class="suitrow"><span style="font-size:20px;color:'+suitColor(s,true)+'">'+s+'</span><span class="ex">'+escapeHtml(nwEx[s])+'</span></div>').join('')
     + '</div>'
     + '<button class="btn-primary" onclick="startWorkout('+store.programIndex+')" '+(active?'disabled':'')+'>'+t("startWorkout",{l:nw.letter})+'</button>'
     + (active?'<div style="text-align:center;margin-top:8px;font-size:12px;color:var(--muted)">'+t("finishFirst")+'</div>':'')
@@ -671,6 +868,45 @@ function homeHTML(){
   }
   h += '</div>';
 
+  h += '</div><div>';
+
+  // Stats
+  h += '<div class="statgrid">'
+    + '<div class="stat"><div class="v">'+completed.length+'</div><div class="l">'+t("statDecks")+'</div></div>'
+    + '<div class="stat"><div class="v">'+(best?fmtTime(best):'\u2014')+'</div><div class="l">'+t("statBest")+'</div></div>'
+    + '<div class="stat"><div class="v">'+(completed.length*416)+'</div><div class="l">'+t("statReps")+'</div></div></div>';
+
+  // Chart
+  h += '<div class="panel"><div class="eyebrow" style="margin-bottom:8px">'+t("chartTitle")+'</div>' + chartSVG(completed)
+    + '<div style="display:flex;gap:14px;justify-content:center;margin-top:8px;flex-wrap:wrap">'
+    + WORKOUTS.map((w,i)=>'<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+w.color+';margin-right:4px"></span>'+t("workoutN",{l:w.letter})+'</span>').join('')
+    + '<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+CUSTOM_COLOR+';margin-right:4px"></span>'+t("tagCustom")+'</span>'
+    + '</div></div>';
+
+  // History
+  if(store.history.length>0){
+    h += '<div class="panel"><div class="eyebrow" style="margin-bottom:6px">'+t("history")+'</div>'
+      + store.history.slice().reverse().slice(0,8).map(x=>{
+          const m=entryMeta(x);
+          return '<div class="histrow" style="opacity:'+(x.completed?1:.5)+'">'
+            + '<span><span class="slab" style="color:'+m.color+';font-size:13px">'+m.letter+'</span>&nbsp; '
+            + new Date(x.date).toLocaleDateString(store.settings.lang==="sv"?"sv-SE":undefined)
+            + (x.completed?'':' <span style="color:var(--muted)">\u00b7 '+t("endedAt")+' '+x.cardsDone+'/'+(x.cardsTotal||52)+'</span>')
+            + '</span><span style="color:var(--muted)">'+fmtTime(x.durationSec)+'</span></div>';
+        }).join('')
+      + '</div>';
+  }
+
+  h += '</div></div>';
+
+  // Options last, behind a button: the box had grown tall and is the least interesting thing here
+  h += !showOptions
+    ? '<button class="btn-secondary" onclick="toggleOptions(true)">'+t("options")+'</button>'
+    : optionsHTML();
+  return h;
+}
+function optionsHTML(){
+  let h = '';
   // Options: jokers, sound, language, edit workouts, data
   h += '<div class="panel"><div class="eyebrow">'+t("options")+'</div>'
     + '<div class="optrow"><label for="jok">'+t("jokersIn")+'</label>'
@@ -724,42 +960,17 @@ function homeHTML(){
       + '</div>'
       + '<div id="datamsg" style="font-size:12px;color:var(--gold);margin-top:6px;min-height:16px">'+escapeHtml(dataMsg)+'</div>';
   }
-  h += '</div>';
 
-  h += '</div><div>';
-
-  // Stats
-  h += '<div class="statgrid">'
-    + '<div class="stat"><div class="v">'+completed.length+'</div><div class="l">'+t("statDecks")+'</div></div>'
-    + '<div class="stat"><div class="v">'+(best?fmtTime(best):'\u2014')+'</div><div class="l">'+t("statBest")+'</div></div>'
-    + '<div class="stat"><div class="v">'+(completed.length*416)+'</div><div class="l">'+t("statReps")+'</div></div></div>';
-
-  // Chart
-  h += '<div class="panel"><div class="eyebrow" style="margin-bottom:8px">'+t("chartTitle")+'</div>' + chartSVG(completed)
-    + '<div style="display:flex;gap:14px;justify-content:center;margin-top:8px;flex-wrap:wrap">'
-    + WORKOUTS.map((w,i)=>'<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+w.color+';margin-right:4px"></span>'+t("workoutN",{l:w.letter})+'</span>').join('')
-    + '<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+CUSTOM_COLOR+';margin-right:4px"></span>'+t("tagCustom")+'</span>'
-    + '</div></div>';
-
-  // History
-  if(store.history.length>0){
-    h += '<div class="panel"><div class="eyebrow" style="margin-bottom:6px">'+t("history")+'</div>'
-      + store.history.slice().reverse().slice(0,8).map(x=>{
-          const m=entryMeta(x);
-          return '<div class="histrow" style="opacity:'+(x.completed?1:.5)+'">'
-            + '<span><span class="slab" style="color:'+m.color+';font-size:13px">'+m.letter+'</span>&nbsp; '
-            + new Date(x.date).toLocaleDateString(store.settings.lang==="sv"?"sv-SE":undefined)
-            + (x.completed?'':' <span style="color:var(--muted)">\u00b7 '+t("endedAt")+' '+x.cardsDone+'/'+(x.cardsTotal||52)+'</span>')
-            + '</span><span style="color:var(--muted)">'+fmtTime(x.durationSec)+'</span></div>';
-        }).join('')
-      + '</div>';
+  if(store.lastSession){
+    h += '<button class="btn-secondary" style="margin-top:10px" onclick="exportLastSession()">'+t("exportLast")+'</button>'
+      + '<div id="lastmsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>';
   }
 
-  // Reset
+  // Resetting everything belongs with the other rarely touched things
   if(store.history.length>0 || store.programIndex!==0 || active){
-    h += '<div style="text-align:center;margin-top:4px">';
     if(!confirmReset){
-      h += '<button class="linkbtn" onclick="setConfirmReset(true)">'+t("reset")+'</button>';
+      h += '<button class="btn-secondary" style="margin-top:10px;color:var(--suitred-lt);border-color:rgba(224,96,85,.45)"'
+        + ' onclick="setConfirmReset(true)">'+t("reset")+'</button>';
     } else {
       h += '<div class="confirm" style="border-color:rgba(192,86,74,.6);text-align:center">'
         + '<div style="font-size:13px">'+t("resetConfirm")+'</div>'
@@ -768,9 +979,9 @@ function homeHTML(){
         + '<button onclick="setConfirmReset(false)" style="border:1px solid rgba(246,241,227,.25);color:var(--muted)">'+t("cancel")+'</button>'
         + '</div></div>';
     }
-    h += '</div>';
   }
-  h += '</div></div>';
+  h += '<button class="btn-secondary" style="margin-top:12px" onclick="toggleOptions(false)">'+t("close")+'</button>';
+  h += '</div>';
   return h;
 }
 
@@ -923,9 +1134,9 @@ function bottomZoneHTML(){
   const left = repsLeftPerSuit();
   return '<div class="eyebrow" style="font-size:10px;letter-spacing:1.5px;margin-bottom:6px">'+t("repsLeftPerSuit")+'</div>'
     + '<div class="suitgrid" style="gap:6px">'
-    + SUITS.map(s=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
-        + '<span style="font-size:16px;color:'+suitColor(s,true)+'">'+s+'</span>'
-        + '<span style="color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(active.ex[s])+'</span>'
+    + SUITS.map(s=>'<div class="suitrow" style="padding:6px 8px;font-size:12px;gap:6px">'
+        + '<span style="font-size:15px;color:'+suitColor(s,true)+'">'+s+'</span>'
+        + '<span class="ex" style="color:var(--muted)">'+escapeHtml(active.ex[s])+'</span>'
         + '<span class="slab" style="font-size:14px">'+left[s]+'</span></div>').join('')
     + '</div>';
 }
@@ -942,6 +1153,150 @@ function endZoneHTML(){
     + '<button onclick="setConfirmEnd(false)" style="border:1px solid rgba(246,241,227,.25);color:var(--muted)">'+t("keepGoing")+'</button>'
     + '</div></div>';
 }
+// The whole session as it was measured: the raw draw times first, the numbers we derived from
+// them second, so a re-analysis can disagree with us.
+function exportLastSession(){
+  if(!store.lastSession) return;
+  let when = "", letter = "X";
+  try{ const d = JSON.parse(store.lastSession); when = d.finishedAt.slice(0,10); letter = d.workout; }catch(e){}
+  exportSession(store.lastSession, "fulldeck-"+when+"-"+letter+".json", "lastmsg");
+}
+function sessionExportJSON(){
+  const p = lastPace, r = lastResult;
+  return JSON.stringify({
+    schema: "fulldeck.session.2",
+    exported: new Date().toISOString(),
+    workout: r.workout>=0 ? WORKOUTS[r.workout].letter : "custom",
+    tag: r.workout>=0 ? t("tag"+r.workout) : t("tagCustom"),
+    lang: store.settings.lang,
+    startedAt: new Date(p.start).toISOString(),
+    finishedAt: new Date(p.end).toISOString(),
+    durationSec: r.durationSec,
+    cardsTotal: r.cardsTotal, cardsDrawn: p.cards, reps: p.reps,
+    exercises: p.ex, jokerTask: p.jokerTask,
+    derived: {
+      overheadSecPerCard: +p.setup.toFixed(2),
+      secondHalfOverheadChange: +p.sprint.toFixed(2),
+      halfCutAtCard: p.cut,
+      // one per half of the deck, or a single entry when the deck was too short to split
+      halves: p.fits.map(f=>({ setupSec:+f.setup.toFixed(2), recoverySecPerPrevRep:+f.rec.toFixed(3),
+                               sameExerciseSavingSec:+f.cont.toFixed(2),
+                               perRep:SUITS.reduce((o,s)=>{ if(f.rate[s]!=null) o[s]=+f.rate[s].toFixed(3); return o; }, {}) })),
+      perRep: p.rows.reduce((o,row)=>{ o[row.suit] = +row.perRep.toFixed(3); return o; }, {})
+    },
+    cards: p.log
+  }, null, 1);
+}
+function exportSession(json, name, msgId){
+  json = json || sessionExportJSON();
+  name = name || ("fulldeck-" + new Date(lastPace.end).toISOString().slice(0,10)
+             + "-" + (lastResult.workout>=0 ? WORKOUTS[lastResult.workout].letter : "X") + ".json");
+  let saved = false;
+  try{
+    const url = URL.createObjectURL(new Blob([json], {type:"application/json"}));
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 10000);
+    saved = true;
+  }catch(e){}
+  const show = msg => { const el = document.getElementById(msgId||"pacemsg"); if(el) el.textContent = msg; };
+  show(saved ? t("exportedFile",{f:name}) : t("exported"));
+  const box = document.getElementById(msgId ? "" : "paceio");
+  if(box){ box.style.display = "block"; box.value = json; }   // also there to copy by hand
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(json)
+      .then(()=>show(t(saved ? "exportedBoth" : "copied", {f:name}))).catch(()=>{});
+  }
+}
+// one colour per suit, distinct against the felt; ordered like SUITS
+const PACE_COLORS = ["#9DB8A8","#E06055","#C9A227","#8F9FBC"];
+function paceBoxHTML(){
+  if(!lastPace || !lastPace.points.length) return '';
+  const p = lastPace;
+  const W=360, H=150, padL=8, padR=8, padT=16, padB=20;
+  const sorted = p.points.map(q=>q.spr).sort((a,b)=>a-b);
+  // A long rest lands on one card and would flatten everything else, so the scale spans the
+  // first to the ninth decile rather than the extremes, and both ends are written out: the
+  // floor is not zero, so the picture would mislead without them.
+  const lo = Math.max(0, sorted[Math.floor(0.1*(sorted.length-1))]*0.9);
+  const hi = Math.max(sorted[Math.floor(0.9*(sorted.length-1))]*1.1, lo+0.2);
+  const mid = wmedian(p.points.map(q=>[q.spr, q.v]));
+  const xAt = n => padL + (p.cards>1 ? (n-1)/(p.cards-1) : 0.5) * (W-padL-padR);
+  const yAt = v => H-padB - (Math.min(Math.max(v,lo),hi)-lo)/(hi-lo) * (H-padT-padB);
+  const yMax = hi;
+  let over = 0, g = '';
+  g += '<line x1="'+padL+'" y1="'+yAt(mid).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+yAt(mid).toFixed(1)+'"'
+     + ' stroke="rgba(246,241,227,.25)" stroke-dasharray="3 3" stroke-width="1"/>';
+  // A two says much less about your pace than a king does, so it neither pulls the line as
+  // hard nor draws as large a dot: the reps are the weight, in the arithmetic and on the eye.
+  SUITS.forEach((s,i)=>{
+    const pts = p.points.filter(q=>q.s===s);
+    if(!pts.length) return;
+    const smooth = pts.map((q,j)=>wmedian(pts.slice(Math.max(0,j-1), j+2).map(o=>[o.spr, o.v])));
+    g += '<polyline fill="none" stroke="'+PACE_COLORS[i]+'" stroke-width="1.6" stroke-linejoin="round" opacity=".9" points="'
+       + pts.map((q,j)=>xAt(q.n).toFixed(1)+','+yAt(smooth[j]).toFixed(1)).join(' ')+'"/>';
+    pts.forEach(q=>{
+      if(q.spr>hi || q.spr<lo) over++;
+      g += '<circle cx="'+xAt(q.n).toFixed(1)+'" cy="'+yAt(q.spr).toFixed(1)+'" r="'
+         + (1.1 + q.v/9).toFixed(1)+'" fill="'+PACE_COLORS[i]+'" opacity=".5"/>';
+    });
+  });
+  g += '<text x="'+(W-padR)+'" y="'+(H-6)+'" text-anchor="end" font-size="8" fill="#9DB8A8">'+p.cards+' '+t("cardsWord")+'</text>'
+     + '<text x="'+padL+'" y="'+(padT-6)+'" font-size="8" fill="#9DB8A8">'+hi.toFixed(1)+' s</text>'
+     + '<text x="'+padL+'" y="'+(H-padB+9)+'" font-size="8" fill="#9DB8A8">'+lo.toFixed(1)+' s</text>';
+  // First half against second, each exercise against itself. Comparing the halves as a whole
+  // would mostly measure which exercises the shuffle happened to deal late, not fatigue.
+  // Weighted medians throughout, so neither an unplanned rest nor a two decides the answer.
+  const ratios = [];
+  SUITS.forEach(s=>{
+    const early = p.points.filter(q=>q.s===s && q.n<=p.cut).map(q=>[q.spr, q.v]);
+    const late = p.points.filter(q=>q.s===s && q.n>p.cut).map(q=>[q.spr, q.v]);
+    if(early.length>=3 && late.length>=3 && wmedian(early)>0)
+      ratios.push([wmedian(late)/wmedian(early), early.length+late.length]);
+  });
+  // Half a deck behind each side of the comparison: against a known nothing the figure still
+  // strays past eight per cent on half of all decks and past fifteen on a fifth. Twenty is
+  // where the false alarms fall to one deck in ten, so that is where it starts being worth
+  // saying, and even then it is rounded to five rather than pretending to a precision it
+  // does not have.
+  let drift = '';
+  if(ratios.length>=2){
+    const d = (wmedian(ratios) - 1) * 100;
+    drift = Math.abs(d)<20 ? t("paceEven")
+          : t(d>0 ? "paceSlower" : "paceFaster", {n:Math.round(Math.abs(d)/5)*5});
+  }
+  // The finish is its own claim and a steadier one: not that the reps got quicker but that
+  // there was less standing about between them. Same reasoning on the threshold.
+  const sprint = Math.abs(p.sprint)>=4
+    ? t(p.sprint<0 ? "paceRush" : "paceLinger", {n:Math.abs(p.sprint).toFixed(0)}) : '';
+  // Only worth a sentence once it is worth more than a second; below that it is arithmetic
+  // no one needs to read.
+  const cont = p.cont>=1 ? t("paceSameEx", {n:p.cont.toFixed(0)}) : '';
+  return '<div class="panel" style="width:100%;text-align:left;margin-top:26px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'
+    + '<span class="eyebrow">'+t("paceTitle")+'</span>'
+    + '<span style="font-size:11px;color:var(--muted)">'+t("medianShort")+' '+mid.toFixed(1)+' s</span></div>'
+    + '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto" role="img" aria-label="'+t("paceTitle")+'">'+g+'</svg>'
+    + '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">'
+    + '<span>'+drift+'</span><span>'+(over?t("paceOff",{n:over}):'')+'</span></div>'
+    + '<div class="suitlist" style="margin-top:10px">'
+    + p.rows.map(r=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
+        + '<span style="font-size:16px;color:'+PACE_COLORS[SUITS.indexOf(r.suit)]+'">'+r.suit+'</span>'
+        + '<span class="ex" style="color:var(--muted)">'+escapeHtml(r.ex)+'</span>'
+        + '<span class="slab" style="font-size:13px">'+r.perRep.toFixed(1)+'</span>'
+        + '<span style="font-size:10px;color:var(--muted)">s/rep</span></div>').join('')
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4">'
+    + t("paceSetup",{n:p.setup.toFixed(1)})+'. '
+    + (sprint ? sprint+'. ' : '')
+    + (cont ? cont+'. ' : '')
+    + t("paceHint")+'</div>'
+    + '<button class="btn-secondary" style="margin-top:12px;font-size:14px" onclick="exportSession()">'+t("exportSession")+'</button>'
+    + '<div id="pacemsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>'
+    + '<textarea id="paceio" spellcheck="false" style="display:none;height:120px"></textarea>'
+    + '</div>';
+}
 function doneHTML(){
   const completed = store.history.filter(h=>h.completed);
   const best = completed.length ? Math.min.apply(null, completed.map(h=>h.durationSec)) : null;
@@ -953,9 +1308,10 @@ function doneHTML(){
   return '<div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding-top:40px">'
     + '<div style="font-size:60px">'+icon+'</div>'
     + '<div class="slab" style="font-size:30px;color:var(--gold);margin-top:8px">'+t("deckComplete")+'</div>'
-    + '<div style="color:var(--muted);font-size:14px;margin-bottom:24px">'+title+' \u00b7 '+(lastResult.cardsTotal||52)+' '+t("cardsWord")+' \u00b7 416 reps'+((lastResult.cardsTotal||52)>52?' + jokers':'')+'</div>'
+    + '<div style="color:var(--muted);font-size:14px;margin-bottom:24px">'+title+' \u00b7 '+(lastResult.cardsTotal||52)+' '+t("cardsWord")+' \u00b7 '+((lastPace&&lastPace.reps)||416)+' '+t("repsWord")+'</div>'
     + '<div class="slab" style="font-size:54px;line-height:1">'+fmtTime(lastResult.durationSec)+'</div>'
     + '<div style="color:var(--muted);font-size:13px;margin-top:6px">'+(isBest?t("newBest"):t("timeSaved"))+'</div>'
+    + paceBoxHTML()
     + '<div style="background:rgba(246,241,227,.06);border-radius:12px;padding:12px 16px;margin:32px 0 24px;font-size:14px">'+t("upNextShort")+' <span class="slab" style="color:'+nw.color+'">'+t("workoutN",{l:nw.letter})+'</span> \u00b7 '+t("tag"+store.programIndex)+'</div>'
     + '<button class="btn-primary" onclick="goHome()">'+t("back")+'</button>'
     + '</div>';
