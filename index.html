@@ -1032,9 +1032,9 @@ function bottomZoneHTML(){
   }
   const left = repsLeftPerSuit();
   return '<div class="eyebrow" style="font-size:10px;letter-spacing:1.5px;margin-bottom:6px">'+t("repsLeftPerSuit")+'</div>'
-    + '<div class="suitlist">'
-    + SUITS.map(s=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
-        + '<span style="font-size:16px;color:'+suitColor(s,true)+'">'+s+'</span>'
+    + '<div class="suitgrid" style="gap:6px">'
+    + SUITS.map(s=>'<div class="suitrow" style="padding:6px 8px;font-size:12px;gap:6px">'
+        + '<span style="font-size:15px;color:'+suitColor(s,true)+'">'+s+'</span>'
         + '<span class="ex" style="color:var(--muted)">'+escapeHtml(active.ex[s])+'</span>'
         + '<span class="slab" style="font-size:14px">'+left[s]+'</span></div>').join('')
     + '</div>';
