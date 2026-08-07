@@ -180,8 +180,8 @@ en: {
   paceTitle:"Seconds per rep", medianShort:"median",
   paceHint:"Each line is one exercise, card by card through the deck.",
   paceSetup:"Drawing a card and getting set took about {n} s, worked out from the deck itself and taken off before the reps are counted",
-  paceOff:"{n} above the scale",
-  paceSlower:"Second half {n}% slower", paceFaster:"Second half {n}% faster", paceEven:"Steady all the way",
+  paceOff:"{n} outside the scale",
+  paceSlower:"Second half roughly {n}% slower", paceFaster:"Second half roughly {n}% faster", paceEven:"Steady all the way",
   undoCard:"Undo last card",
   readyLine:"Tap the deck when you\u2019re ready. The clock is running.",
   finishDeckBtn:"Finish deck \u2014 stop the clock",
@@ -233,7 +233,7 @@ sv: {
   paceHint:"Varje linje \u00e4r en \u00f6vning, kort f\u00f6r kort genom leken.",
   paceSetup:"Att dra kortet och komma i l\u00e4ge tog ca {n} s, skattat ur passet och bortdraget innan repsen r\u00e4knas",
   paceOff:"{n} utanf\u00f6r skalan",
-  paceSlower:"Andra halvan {n} % l\u00e5ngsammare", paceFaster:"Andra halvan {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
+  paceSlower:"Andra halvan ca {n} % l\u00e5ngsammare", paceFaster:"Andra halvan ca {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
   undoCard:"\u00c5ngra senaste kortet",
   readyLine:"Tryck p\u00e5 leken n\u00e4r du \u00e4r redo. Klockan g\u00e5r.",
   finishDeckBtn:"Avsluta leken \u2014 stoppa klockan",
@@ -494,21 +494,33 @@ function median(a){
   return b.length%2 ? b[m] : (b[m-1]+b[m])/2;
 }
 // Every card costs a fixed amount before the work starts: drawing it, reading it, getting
-// into position. Fitting duration = setup + reps * perRep separates that from the reps, so a
-// two and a king of the same exercise become comparable. The slope is the median of the
-// pairwise slopes rather than a least squares fit, because a single unplanned rest would drag
-// a least squares line badly, and the deck gives us only thirteen cards per exercise.
-function fitCards(cards){
-  const flat = median(cards.map(c=>c.dur/c.v));
-  if(cards.length<5) return {setup:0, perRep:flat};
-  const slopes = [];
-  for(let i=0;i<cards.length;i++) for(let j=i+1;j<cards.length;j++)
-    if(cards[j].v!==cards[i].v) slopes.push((cards[j].dur-cards[i].dur)/(cards[j].v-cards[i].v));
-  if(!slopes.length) return {setup:0, perRep:flat};
-  const perRep = median(slopes);
-  if(perRep<=0) return {setup:0, perRep:flat}; // nothing sensible to subtract
-  const setup = Math.min(20, Math.max(0, median(cards.map(c=>c.dur - perRep*c.v))));
-  return {setup:setup, perRep:perRep};
+// into position. That cost belongs to the card rather than to the exercise, so one setup is
+// fitted for the whole deck and only the rate is fitted per exercise. Sharing it halves the
+// free parameters, and over simulated decks it cut the spread in the rates by a third: with a
+// setup per exercise the two traded against each other on thirteen points.
+// Medians throughout, because a single unplanned rest would drag a least squares fit badly.
+function fitDeck(cards){
+  const rate = {};
+  SUITS.forEach(s=>{
+    const mine = cards.filter(c=>c.s===s);
+    if(!mine.length) return;
+    const slopes = [];
+    for(let i=0;i<mine.length;i++) for(let j=i+1;j<mine.length;j++)
+      if(mine[j].v!==mine[i].v) slopes.push((mine[j].dur-mine[i].dur)/(mine[j].v-mine[i].v));
+    const guess = slopes.length ? median(slopes) : median(mine.map(c=>c.dur/c.v));
+    rate[s] = guess>0 ? guess : median(mine.map(c=>c.dur/c.v));
+  });
+  let setup = 0;
+  if(cards.length>=8){
+    for(let pass=0; pass<3; pass++){          // settles well inside three rounds
+      setup = Math.min(25, Math.max(0, median(cards.map(c=>c.dur - rate[c.s]*c.v))));
+      SUITS.forEach(s=>{
+        const mine = cards.filter(c=>c.s===s);
+        if(mine.length) rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-setup)/c.v)));
+      });
+    }
+  }
+  return {setup:setup, rate:rate};
 }
 // How long each card took, from the moment it was drawn until the next one was. The wait
 // before the very first draw is getting ready, not work, so it never counts. Jokers carry a
@@ -528,17 +540,13 @@ function sessionPace(endEpoch){
   }
   const cards = active.drawnCards.length;
   if(!timed.length) return {reps:reps, rows:[], points:[], cards:cards, setup:0};
-  const rows = [], points = [];
-  SUITS.forEach(s=>{
-    const mine = timed.filter(c=>c.s===s);
-    if(!mine.length) return;
-    const fit = fitCards(mine);
-    mine.forEach(c=>points.push({n:c.n, s:s, spr:Math.max(0,(c.dur-fit.setup)/c.v)}));
-    rows.push({suit:s, ex:active.ex[s], cards:mine.length, perRep:fit.perRep, setup:fit.setup,
-               reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)});
-  });
-  points.sort((a,b)=>a.n-b.n);
-  return {reps:reps, rows:rows, points:points, cards:cards, setup:median(rows.map(r=>r.setup))};
+  const fit = fitDeck(timed);
+  const points = timed.map(c=>({n:c.n, s:c.s, spr:Math.max(0,(c.dur-fit.setup)/c.v)}));
+  const rows = SUITS.filter(s=>timed.some(c=>c.s===s)).map(s=>({
+    suit:s, ex:active.ex[s], cards:timed.filter(c=>c.s===s).length, perRep:fit.rate[s],
+    reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)
+  }));
+  return {reps:reps, rows:rows, points:points, cards:cards, setup:fit.setup};
 }
 function finishDeck(){
   if(!active) return;
@@ -1027,27 +1035,32 @@ function paceBoxHTML(){
   const p = lastPace;
   const W=360, H=150, padL=8, padR=8, padT=16, padB=20;
   const sorted = p.points.map(q=>q.spr).sort((a,b)=>a-b);
-  // a long rest lands on one card and would flatten everything else, so the scale follows
-  // the ninth decile and anything above it is drawn at the ceiling and counted
-  const yMax = Math.max(sorted[Math.floor(0.9*(sorted.length-1))]*1.25, 0.2);
+  // A long rest lands on one card and would flatten everything else, so the scale spans the
+  // first to the ninth decile rather than the extremes, and both ends are written out: the
+  // floor is not zero, so the picture would mislead without them.
+  const lo = Math.max(0, sorted[Math.floor(0.1*(sorted.length-1))]*0.9);
+  const hi = Math.max(sorted[Math.floor(0.9*(sorted.length-1))]*1.1, lo+0.2);
   const mid = median(sorted);
   const xAt = n => padL + (p.cards>1 ? (n-1)/(p.cards-1) : 0.5) * (W-padL-padR);
-  const yAt = v => H-padB - Math.min(v,yMax)/yMax * (H-padT-padB);
+  const yAt = v => H-padB - (Math.min(Math.max(v,lo),hi)-lo)/(hi-lo) * (H-padT-padB);
+  const yMax = hi;
   let over = 0, g = '';
   g += '<line x1="'+padL+'" y1="'+yAt(mid).toFixed(1)+'" x2="'+(W-padR)+'" y2="'+yAt(mid).toFixed(1)+'"'
      + ' stroke="rgba(246,241,227,.25)" stroke-dasharray="3 3" stroke-width="1"/>';
   SUITS.forEach((s,i)=>{
     const pts = p.points.filter(q=>q.s===s);
     if(!pts.length) return;
-    g += '<polyline fill="none" stroke="'+PACE_COLORS[i]+'" stroke-width="1.3" stroke-linejoin="round" opacity=".75" points="'
-       + pts.map(q=>xAt(q.n).toFixed(1)+','+yAt(q.spr).toFixed(1)).join(' ')+'"/>';
+    const smooth = pts.map((q,j)=>median(pts.slice(Math.max(0,j-1), j+2).map(o=>o.spr)));
+    g += '<polyline fill="none" stroke="'+PACE_COLORS[i]+'" stroke-width="1.6" stroke-linejoin="round" opacity=".9" points="'
+       + pts.map((q,j)=>xAt(q.n).toFixed(1)+','+yAt(smooth[j]).toFixed(1)).join(' ')+'"/>';
     pts.forEach(q=>{
-      if(q.spr>yMax) over++;
-      g += '<circle cx="'+xAt(q.n).toFixed(1)+'" cy="'+yAt(q.spr).toFixed(1)+'" r="2" fill="'+PACE_COLORS[i]+'"/>';
+      if(q.spr>hi || q.spr<lo) over++;
+      g += '<circle cx="'+xAt(q.n).toFixed(1)+'" cy="'+yAt(q.spr).toFixed(1)+'" r="1.7" fill="'+PACE_COLORS[i]+'" opacity=".5"/>';
     });
   });
-  g += '<text x="'+padL+'" y="'+(H-6)+'" font-size="8" fill="#9DB8A8">1</text>'
-     + '<text x="'+(W-padR)+'" y="'+(H-6)+'" text-anchor="end" font-size="8" fill="#9DB8A8">'+p.cards+' '+t("cardsWord")+'</text>';
+  g += '<text x="'+(W-padR)+'" y="'+(H-6)+'" text-anchor="end" font-size="8" fill="#9DB8A8">'+p.cards+' '+t("cardsWord")+'</text>'
+     + '<text x="'+padL+'" y="'+(padT-6)+'" font-size="8" fill="#9DB8A8">'+hi.toFixed(1)+' s</text>'
+     + '<text x="'+padL+'" y="'+(H-padB+9)+'" font-size="8" fill="#9DB8A8">'+lo.toFixed(1)+' s</text>';
   // First half against second, each exercise against itself. Comparing the halves as a whole
   // would mostly measure which exercises the shuffle happened to deal late, not fatigue.
   // Medians throughout, so an unplanned rest lands on one card without deciding the answer.
@@ -1058,11 +1071,14 @@ function paceBoxHTML(){
     const late = p.points.filter(q=>q.s===s && q.n>cut).map(q=>q.spr);
     if(early.length>=3 && late.length>=3 && median(early)>0) ratios.push(median(late)/median(early));
   });
+  // One deck is a small sample: against a known 10% the figure lands anywhere from 3 to 17,
+  // so anything under 8 is called steady and the rest is rounded to five rather than pretending
+  // to a precision it does not have.
   let drift = '';
   if(ratios.length>=2){
     const d = (median(ratios) - 1) * 100;
-    drift = Math.abs(d)<3 ? t("paceEven")
-          : t(d>0 ? "paceSlower" : "paceFaster", {n:Math.abs(d).toFixed(0)});
+    drift = Math.abs(d)<8 ? t("paceEven")
+          : t(d>0 ? "paceSlower" : "paceFaster", {n:Math.round(Math.abs(d)/5)*5});
   }
   return '<div class="panel" style="width:100%;text-align:left;margin-top:26px">'
     + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">'
