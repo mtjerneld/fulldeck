@@ -41,8 +41,11 @@ textarea{font-family:monospace;font-size:11px;color:var(--cream);background:rgba
 .slab{font-family:var(--slab);font-weight:400}
 .panel{background:rgba(246,241,227,.06);border:1px solid rgba(246,241,227,.15);border-radius:16px;padding:18px;margin-bottom:14px}
 .eyebrow{color:var(--muted);font-size:12px;letter-spacing:2px;text-transform:uppercase}
-.suitrow{display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.25);border-radius:10px;padding:8px 10px;font-size:13px}
+.suitrow{display:flex;align-items:center;gap:8px;background:rgba(0,0,0,.25);border-radius:10px;padding:8px 10px;font-size:13px;min-width:0}
+.suitrow .ex{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .suitgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.suitlist{display:grid;grid-template-columns:1fr;gap:6px}
+.suitgrid>*{min-width:0}
 .btn-primary{display:block;width:100%;border-radius:12px;padding:13px;font-family:var(--slab);font-size:18px;background:var(--gold);color:var(--ink)}
 .btn-primary:disabled{background:rgba(201,162,39,.3);color:rgba(34,32,28,.5);cursor:default}
 .btn-secondary{display:block;width:100%;border-radius:12px;padding:11px;font-family:var(--slab);font-size:15px;
@@ -741,7 +744,7 @@ function homeHTML(){
     + '<span class="eyebrow">'+t("upNext")+'</span>'
     + '<span class="slab" style="font-size:22px;color:'+nw.color+'">'+nw.letter+' <span style="font-family:var(--body);font-size:13px;color:var(--muted)">\u00b7 '+t("tag"+store.programIndex)+'</span></span></div>'
     + '<div class="suitgrid" style="margin-bottom:14px">'
-    + SUITS.map(s=>'<div class="suitrow"><span style="font-size:20px;color:'+suitColor(s,true)+'">'+s+'</span><span>'+escapeHtml(nwEx[s])+'</span></div>').join('')
+    + SUITS.map(s=>'<div class="suitrow"><span style="font-size:20px;color:'+suitColor(s,true)+'">'+s+'</span><span class="ex">'+escapeHtml(nwEx[s])+'</span></div>').join('')
     + '</div>'
     + '<button class="btn-primary" onclick="startWorkout('+store.programIndex+')" '+(active?'disabled':'')+'>'+t("startWorkout",{l:nw.letter})+'</button>'
     + (active?'<div style="text-align:center;margin-top:8px;font-size:12px;color:var(--muted)">'+t("finishFirst")+'</div>':'')
@@ -1029,10 +1032,10 @@ function bottomZoneHTML(){
   }
   const left = repsLeftPerSuit();
   return '<div class="eyebrow" style="font-size:10px;letter-spacing:1.5px;margin-bottom:6px">'+t("repsLeftPerSuit")+'</div>'
-    + '<div class="suitgrid" style="gap:6px">'
+    + '<div class="suitlist">'
     + SUITS.map(s=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
         + '<span style="font-size:16px;color:'+suitColor(s,true)+'">'+s+'</span>'
-        + '<span style="color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(active.ex[s])+'</span>'
+        + '<span class="ex" style="color:var(--muted)">'+escapeHtml(active.ex[s])+'</span>'
         + '<span class="slab" style="font-size:14px">'+left[s]+'</span></div>').join('')
     + '</div>';
 }
@@ -1158,10 +1161,10 @@ function paceBoxHTML(){
     + '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto" role="img" aria-label="'+t("paceTitle")+'">'+g+'</svg>'
     + '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">'
     + '<span>'+drift+'</span><span>'+(over?t("paceOff",{n:over}):'')+'</span></div>'
-    + '<div class="suitgrid" style="gap:6px;margin-top:10px">'
+    + '<div class="suitlist" style="margin-top:10px">'
     + p.rows.map(r=>'<div class="suitrow" style="padding:6px 10px;font-size:12px">'
         + '<span style="font-size:16px;color:'+PACE_COLORS[SUITS.indexOf(r.suit)]+'">'+r.suit+'</span>'
-        + '<span style="color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(r.ex)+'</span>'
+        + '<span class="ex" style="color:var(--muted)">'+escapeHtml(r.ex)+'</span>'
         + '<span class="slab" style="font-size:13px">'+r.perRep.toFixed(1)+'</span>'
         + '<span style="font-size:10px;color:var(--muted)">s/rep</span></div>').join('')
     + '</div>'
