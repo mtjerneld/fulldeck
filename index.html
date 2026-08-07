@@ -567,25 +567,9 @@ function fitDeck(cards){
       });
     }
   }
-  // Two push-ups and then three more: you never leave the position, so there is nothing to
-  // set up and you simply rip them off. Those cards have a known-smaller cost, which makes
-  // them the one place in the deck where the rate can be read almost without a guess — and
-  // without allowing for it they come out below the price of drawing the card at all.
-  // The saving is measured as the gap between what a fresh exercise leaves over and what a
-  // continued one does, capped at the setup itself because it cannot save more than there
-  // was. Over simulated decks it finds 3.7 of a true 5, and where no such saving exists it
-  // finds 0.0 and leaves every other number where it was.
-  let cont = 0;
-  const same = cards.filter(c=>c.same), fresh = cards.filter(c=>!c.same);
-  if(same.length>=4 && fresh.length>=4){
-    const left = c => c.dur - setup - rec*c.prev - rate[c.s]*c.v;
-    cont = Math.min(setup, Math.max(0, median(fresh.map(left)) - median(same.map(left))));
-    if(cont>0) for(let pass=0; pass<3; pass++) SUITS.forEach(s=>{   // rates once more, discount allowed for
-      const mine = cards.filter(c=>c.s===s);
-      if(mine.length) rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-setup-rec*c.prev+(c.same?cont:0))/c.v)));
-    });
-  }
-  return {setup:setup, rec:rec, cont:cont, rate:rate};
+  // The same-exercise saving is fitted at the deck level in sessionPace — it rides on a
+  // dozen cards, too few to split — and written back onto this fit there.
+  return {setup:setup, rec:rec, cont:0, rate:rate};
 }
 // What a card owed before its first rep: getting set, plus recovering from the card before it,
 // less whatever was saved by already standing in the position.
@@ -647,6 +631,30 @@ function sessionPace(endEpoch){
   const fitA = fitDeck(split ? early : timed);
   const fitB = split ? fitDeck(late) : fitA;
   const fitFor = c => (split && c.n>cut) ? fitB : fitA;
+  const fits = split ? [fitA, fitB] : [fitA];
+  const parts = split ? [early, late] : [timed];
+  // Two push-ups and then three more: you never leave the position, so there is nothing to
+  // set up and you simply rip them off. Without allowing for that, those cards come out
+  // below the price of drawing the card at all. The saving is the gap between what a fresh
+  // exercise leaves over and what a continued one does, capped at the setup because it
+  // cannot save more than there was. Unlike the standing about, which demonstrably changes
+  // over the deck, being already in position does not — so this is one number for the whole
+  // deck, pooled across both halves' residuals: only a dozen cards a deck carry it, and six
+  // a side found 2.7 of a true 5 where the pool finds 3.7. Where no saving exists it finds
+  // 0.0 and every other number stays where it was.
+  const sameC = timed.filter(c=>c.same), freshC = timed.filter(c=>!c.same);
+  if(sameC.length>=4 && freshC.length>=4){
+    const left = c => { const f=fitFor(c); return c.dur - f.setup - f.rec*c.prev - f.rate[c.s]*c.v; };
+    const cont = Math.min(Math.min.apply(null, fits.map(f=>f.setup)),
+                          Math.max(0, median(freshC.map(left)) - median(sameC.map(left))));
+    if(cont>0) fits.forEach((f,i)=>{
+      f.cont = cont;
+      SUITS.forEach(s=>{                       // rates once more, discount allowed for
+        const mine = parts[i].filter(c=>c.s===s);
+        if(mine.length) f.rate[s] = Math.max(0.05, median(mine.map(c=>(c.dur-f.setup-f.rec*c.prev+(c.same?cont:0))/c.v)));
+      });
+    });
+  }
   const points = timed.map(c=>({n:c.n, s:c.s, v:c.v,
     spr:Math.max(0,(c.dur-cardOverhead(fitFor(c),c))/c.v)}));
   const rows = SUITS.filter(s=>timed.some(c=>c.s===s)).map(s=>({
@@ -656,9 +664,8 @@ function sessionPace(endEpoch){
   }));
   const ohAll = median(timed.map(c=>cardOverhead(fitFor(c), c)));
   const sprint = split ? median(late.map(c=>cardOverhead(fitB,c))) - median(early.map(c=>cardOverhead(fitA,c))) : 0;
-  const fits = split ? [fitA, fitB] : [fitA];
   return Object.assign({reps:reps, rows:rows, points:points, cut:cut, setup:ohAll, sprint:sprint,
-                        cont:median(fits.map(f=>f.cont)), fits:fits}, common);
+                        cont:fits[0].cont, fits:fits}, common);
 }
 function finishDeck(){
   if(!active) return;
