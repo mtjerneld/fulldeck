@@ -1,6 +1,6 @@
 // Full Deck service worker — caches the app so it works fully offline.
 // Bump the version string whenever you upload a new index.html.
-const CACHE = "fulldeck-v35";   // keep in step with BUILD in index.html
+const CACHE = "fulldeck-v36";   // keep in step with BUILD in index.html
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 const HTML_WAIT = 4000; // how long a start waits for the network before falling back to the cache
 

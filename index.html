@@ -130,7 +130,7 @@ label.btn-secondary:focus-within{outline:2px solid var(--gold);outline-offset:2p
 const KEY = "fulldeck:v1";
 // Printed at the foot of the options, so which build a phone is actually running is a question
 // with an answer. Keep it in step with the cache name in sw.js.
-const BUILD = "v35";
+const BUILD = "v36";
 const SUITS = ["\u2660","\u2665","\u2666","\u2663"]; // spade heart diamond club
 const RED_SUITS = new Set(["\u2665","\u2666"]);
 const JOKER_STAR = "\u2605";
@@ -199,10 +199,11 @@ en: {
   paceRush:"You cut about {n} s of that in the second half — the finish was less standing about, not quicker reps",
   paceLinger:"That grew by about {n} s in the second half, which is rest between cards rather than slower reps",
   paceOff:"{n} outside the scale",
-  exportSession:"Export this deck (JSON)", exportLast:"Export the last deck (JSON)",
+  exportSession:"Export this deck (JSON)", exportFull:"All the measurements (JSON)",
+  exportLast:"The last deck's measurements (JSON)",
   shareSession:"Share this deck\u2026", shareLast:"Share the last deck\u2026",
   shareDeck:"Share the deck", shared:"Shared.",
-  groupHint:"Trained together? Share this deck and everyone can import it into their own profile \u2014 it lands in their history and moves their cycle on.",
+  groupHint:"Trained together? Share this deck and everyone can add it to their own profile \u2014 it lands in their history and moves their cycle on. Shared is the deck, the day and the time; the measurements are the file at the bottom.",
   exportedFile:"Saved as {f}", exportedBoth:"Saved as {f}, and copied to the clipboard",
   paceSlower:"Second half roughly {n}% slower", paceFaster:"Second half roughly {n}% faster", paceEven:"Steady all the way",
   undoCard:"Undo last card",
@@ -264,10 +265,11 @@ sv: {
   paceRush:"Av det kapade du ca {n} s i andra halvan \u2014 slutkl\u00e4mmen var mindre stillast\u00e5ende, inte snabbare reps",
   paceLinger:"Det v\u00e4xte med ca {n} s i andra halvan, vilket \u00e4r vila mellan korten snarare \u00e4n l\u00e5ngsammare reps",
   paceOff:"{n} utanf\u00f6r skalan",
-  exportSession:"Exportera passet (JSON)", exportLast:"Exportera senaste passet (JSON)",
+  exportSession:"Exportera passet (JSON)", exportFull:"Alla m\u00e4tv\u00e4rden (JSON)",
+  exportLast:"Senaste passets m\u00e4tv\u00e4rden (JSON)",
   shareSession:"Dela passet\u2026", shareLast:"Dela senaste passet\u2026",
   shareDeck:"Dela passet", shared:"Delad.",
-  groupHint:"K\u00f6rde ni tillsammans? Dela passet s\u00e5 kan alla importera det i sin egen profil \u2014 det hamnar i historiken och flyttar fram deras cykel.",
+  groupHint:"K\u00f6rde ni tillsammans? Dela passet s\u00e5 kan alla l\u00e4gga in det i sin egen profil \u2014 det hamnar i historiken och flyttar fram cykeln. Delat blir passet, dagen och tiden; m\u00e4tv\u00e4rdena ligger i filen l\u00e4ngst ner.",
   exportedFile:"Sparad som {f}", exportedBoth:"Sparad som {f}, och kopierad till urklipp",
   paceSlower:"Andra halvan ca {n} % l\u00e5ngsammare", paceFaster:"Andra halvan ca {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
   undoCard:"\u00c5ngra senaste kortet",
@@ -1277,23 +1279,40 @@ function lastSessionName(){
   try{ const d = JSON.parse(store.lastSession); when = d.finishedAt.slice(0,10); letter = d.workout; }catch(e){}
   return "fulldeck-"+when+"-"+letter+".json";
 }
-function exportLastSession(){
+function exportLastSession(){          // the measurements, kept for as long as the deck is the last one
   if(!store.lastSession) return;
-  exportSession(store.lastSession, lastSessionName(), "lastmsg");
+  exportSession(store.lastSession, fullName(lastSessionName()), "lastmsg");
 }
 function shareLastSession(){
   if(!store.lastSession) return;
-  shareJSON(store.lastSession, lastSessionName(), "lastmsg");
+  shareJSON(sessionSummaryJSON(store.lastSession), lastSessionName(), "lastmsg");
 }
 function sessionFileName(){
   return "fulldeck-" + new Date(lastPace.end).toISOString().slice(0,10)
        + "-" + (lastResult.workout>=0 ? WORKOUTS[lastResult.workout].letter : "X") + ".json";
+}
+function fullName(name){ return name.replace(/\.json$/, "-full.json"); }
+// A profile keeps which deck, when and how long, and nothing else — everything below that in
+// the export is for reading, not for importing, and an import drops it on the floor. So what
+// gets passed round after a session together is the summary: the same document with the
+// measurements left out, a few hundred bytes instead of six thousand. Both import the same way.
+const SUMMARY_FIELDS = ["schema","type","detail","exported","workout","tag",
+                        "startedAt","finishedAt","durationSec","cardsTotal","cardsDrawn","reps"];
+function sessionSummaryJSON(json){
+  try{
+    const d = JSON.parse(json || sessionExportJSON());
+    const out = {};
+    SUMMARY_FIELDS.forEach(k=>{ if(d[k]!==undefined) out[k] = d[k]; });
+    out.detail = "summary";
+    return JSON.stringify(out, null, 1);
+  }catch(e){ return json; }   // unreadable: hand on what we were given rather than nothing
 }
 function sessionExportJSON(){
   const p = lastPace, r = lastResult;
   return JSON.stringify({
     schema: "fulldeck.session.3",
     type: "session",              // one deck, to be added to whatever the reader already has
+    detail: "full",               // ...with every measurement behind it, for reading
     exported: new Date().toISOString(),
     workout: r.workout>=0 ? WORKOUTS[r.workout].letter : "custom",
     tag: r.workout>=0 ? t("tag"+r.workout) : t("tagCustom"),
@@ -1324,8 +1343,9 @@ function canShareFiles(){
       && navigator.canShare({files:[new File(["{}"], "t.json", {type:"application/json"})]}));
   }catch(e){ return false; }
 }
+function exportFull(){ exportSession(sessionExportJSON(), fullName(sessionFileName())); }
 function shareJSON(json, name, msgId){
-  json = json || sessionExportJSON();
+  json = json || sessionSummaryJSON();
   name = name || sessionFileName();
   const show = msg => { const el = document.getElementById(msgId||"pacemsg"); if(el) el.textContent = msg; };
   try{
@@ -1340,7 +1360,7 @@ function shareJSON(json, name, msgId){
   exportSession(json, name, msgId);
 }
 function exportSession(json, name, msgId){
-  json = json || sessionExportJSON();
+  json = json || sessionSummaryJSON();
   name = name || sessionFileName();
   let saved = false;
   try{
@@ -1453,6 +1473,7 @@ function shareBoxHTML(){
     + '<div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px">'+t("groupHint")+'</div>'
     + (canShareFiles() ? '<button class="btn-secondary" style="font-size:14px" onclick="shareJSON()">'+t("shareSession")+'</button>' : '')
     + '<button class="btn-secondary" style="margin-top:8px;font-size:14px" onclick="exportSession()">'+t("exportSession")+'</button>'
+    + '<button class="btn-secondary" style="margin-top:8px;font-size:14px" onclick="exportFull()">'+t("exportFull")+'</button>'
     + '<div id="pacemsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>'
     + '<textarea id="paceio" spellcheck="false" style="display:none;height:120px"></textarea>'
     + '</div>';
