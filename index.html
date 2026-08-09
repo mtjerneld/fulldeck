@@ -128,6 +128,9 @@ label.btn-secondary:focus-within{outline:2px solid var(--gold);outline-offset:2p
 "use strict";
 // ---------- Constants ----------
 const KEY = "fulldeck:v1";
+// Printed at the foot of the options, so which build a phone is actually running is a question
+// with an answer. Keep it in step with the cache name in sw.js.
+const BUILD = "v35";
 const SUITS = ["\u2660","\u2665","\u2666","\u2663"]; // spade heart diamond club
 const RED_SUITS = new Set(["\u2665","\u2666"]);
 const JOKER_STAR = "\u2605";
@@ -1094,6 +1097,7 @@ function optionsHTML(){
     }
   }
   h += '<button class="btn-secondary" style="margin-top:12px" onclick="toggleOptions(false)">'+t("close")+'</button>';
+  h += '<div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px">Full Deck '+BUILD+'</div>';
   h += '</div>';
   return h;
 }
@@ -1561,12 +1565,23 @@ setInterval(()=>{
 if("serviceWorker" in navigator){
   const hadWorker = !!navigator.serviceWorker.controller;   // a first-ever install is not an update
   let reloading = false;
+  let reg = null;
   navigator.serviceWorker.addEventListener("controllerchange", ()=>{
     if(!hadWorker || reloading || active || screen!=="home") return;
     reloading = true;
     location.reload();
   });
-  window.addEventListener("load", ()=>{ navigator.serviceWorker.register("./sw.js").catch(()=>{}); });
+  window.addEventListener("load", ()=>{
+    // updateViaCache:"none" so the worker script is never answered from the browser's own cache
+    navigator.serviceWorker.register("./sw.js", {updateViaCache:"none"})
+      .then(r=>{ reg = r; return r.update(); }).catch(()=>{});
+  });
+  // Installed on a home screen, the app is resumed far more often than it is started, and a
+  // resume is not a navigation — the browser's own check for a new worker may not run for a
+  // day. Asking on every return to the app is what makes an upload arrive the same evening.
+  document.addEventListener("visibilitychange", ()=>{
+    if(document.visibilityState==="visible" && reg) reg.update().catch(()=>{});
+  });
 }
 
 load();

@@ -1,11 +1,19 @@
 // Full Deck service worker — caches the app so it works fully offline.
 // Bump the version string whenever you upload a new index.html.
-const CACHE = "fulldeck-v34";
+const CACHE = "fulldeck-v35";   // keep in step with BUILD in index.html
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 const HTML_WAIT = 4000; // how long a start waits for the network before falling back to the cache
 
+// addAll is all or nothing: one asset that 404s or times out fails the install, the new worker
+// is thrown away and the old one keeps serving the old app — for good, retried on every start
+// and failing the same way. The page itself is what matters; the rest are cached one by one and
+// a straggler is left to the fetch handler to pick up later.
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => c.add("./index.html").then(() => Promise.all(ASSETS.map((a) => c.add(a).catch(() => {})))))
+      .then(() => self.skipWaiting())
+  );
 });
 self.addEventListener("activate", (e) => {
   e.waitUntil(
