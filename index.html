@@ -1553,8 +1553,19 @@ setInterval(()=>{
   }
 }, 1000);
 
-// Offline support
+// Offline support. A new version installs quietly in the background and only takes over at the
+// next start, which is a start or two after it arrived — so when one does take over while the
+// app is open, the page picks it up there and then. Never mid-deck: the cards are saved on every
+// draw, but your place on the workout screen is not, and nobody wants that on the done screen
+// either. Those cases pick it up at the next start, as before.
 if("serviceWorker" in navigator){
+  const hadWorker = !!navigator.serviceWorker.controller;   // a first-ever install is not an update
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", ()=>{
+    if(!hadWorker || reloading || active || screen!=="home") return;
+    reloading = true;
+    location.reload();
+  });
   window.addEventListener("load", ()=>{ navigator.serviceWorker.register("./sw.js").catch(()=>{}); });
 }
 
