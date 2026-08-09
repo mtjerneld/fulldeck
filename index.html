@@ -51,6 +51,10 @@ textarea{font-family:monospace;font-size:11px;color:var(--cream);background:rgba
 .btn-secondary{display:block;width:100%;border-radius:12px;padding:11px;font-family:var(--slab);font-size:15px;
   background:none;border:1px solid rgba(246,241,227,.3);color:var(--cream)}
 .btn-secondary:disabled{opacity:.4;cursor:default}
+/* a file picker dressed as one of the buttons; the input keeps its place in the tab order */
+label.btn-secondary{cursor:pointer;text-align:center}
+label.btn-secondary input{position:absolute;width:0;height:0;opacity:0}
+label.btn-secondary:focus-within{outline:2px solid var(--gold);outline-offset:2px}
 .statgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px}
 .stat{background:rgba(246,241,227,.06);border-radius:12px;padding:12px;text-align:center}
 .stat .v{font-family:var(--slab);font-size:22px}
@@ -167,10 +171,15 @@ en: {
   editDesc:"Change the four exercises in each workout. Applies from your next session.",
   restoreDefaults:"Restore defaults",
   dataBtn:"Export / import data",
-  dataDesc:"Copy this text to back up or move your data to another device. Paste a backup here and press Import to restore.",
-  exportBtn:"Export", importBtn:"Import",
+  dataDesc:"Copy this text to back up or move your data to another device. Paste a backup here to restore everything, or a single deck export to add just that deck to your history.",
+  exportBtn:"Export", importBtn:"Import", importFile:"Choose file\u2026",
   copied:"Exported \u2014 copied to clipboard.", exported:"Exported \u2014 copy the text above.",
   importOk:"Data imported.", importBad:"Couldn\u2019t read that data \u2014 nothing was changed.",
+  importSessionOk:"Deck added to your history.",
+  importSessionOkCycle:"Deck added. Next in your cycle: {l}.",
+  importDup:"You already have that deck \u2014 nothing was changed.",
+  replaceConfirm:"That\u2019s a full backup. Replace everything on this device? You have {n} sessions here now.",
+  replaceBtn:"Replace everything",
   statDecks:"decks completed", statBest:"best time", statReps:"total reps",
   chartTitle:"Workout time, minutes",
   chartEmpty:"No completed decks yet. Your first full deck starts the chart.",
@@ -188,6 +197,9 @@ en: {
   paceLinger:"That grew by about {n} s in the second half, which is rest between cards rather than slower reps",
   paceOff:"{n} outside the scale",
   exportSession:"Export this deck (JSON)", exportLast:"Export the last deck (JSON)",
+  shareSession:"Share this deck\u2026", shareLast:"Share the last deck\u2026",
+  shareDeck:"Share the deck", shared:"Shared.",
+  groupHint:"Trained together? Share this deck and everyone can import it into their own profile \u2014 it lands in their history and moves their cycle on.",
   exportedFile:"Saved as {f}", exportedBoth:"Saved as {f}, and copied to the clipboard",
   paceSlower:"Second half roughly {n}% slower", paceFaster:"Second half roughly {n}% faster", paceEven:"Steady all the way",
   undoCard:"Undo last card",
@@ -224,10 +236,15 @@ sv: {
   editDesc:"\u00c4ndra de fyra \u00f6vningarna i varje pass. G\u00e4ller fr\u00e5n n\u00e4sta pass.",
   restoreDefaults:"\u00c5terst\u00e4ll standard",
   dataBtn:"Exportera / importera data",
-  dataDesc:"Kopiera texten f\u00f6r att s\u00e4kerhetskopiera eller flytta din data till en annan enhet. Klistra in en kopia h\u00e4r och tryck Importera f\u00f6r att \u00e5terst\u00e4lla.",
-  exportBtn:"Exportera", importBtn:"Importera",
+  dataDesc:"Kopiera texten f\u00f6r att s\u00e4kerhetskopiera eller flytta din data till en annan enhet. Klistra in en s\u00e4kerhetskopia f\u00f6r att \u00e5terst\u00e4lla allt, eller ett exporterat pass f\u00f6r att bara l\u00e4gga till det passet i din historik.",
+  exportBtn:"Exportera", importBtn:"Importera", importFile:"V\u00e4lj fil\u2026",
   copied:"Exporterad \u2014 kopierad till urklipp.", exported:"Exporterad \u2014 kopiera texten ovan.",
   importOk:"Data importerad.", importBad:"Kunde inte l\u00e4sa datan \u2014 inget \u00e4ndrades.",
+  importSessionOk:"Passet \u00e4r tillagt i din historik.",
+  importSessionOkCycle:"Passet \u00e4r tillagt. H\u00e4rn\u00e4st i cykeln: {l}.",
+  importDup:"Du har redan det passet \u2014 inget \u00e4ndrades.",
+  replaceConfirm:"Det h\u00e4r \u00e4r en hel s\u00e4kerhetskopia. Ers\u00e4tta allt p\u00e5 den h\u00e4r enheten? Du har {n} pass h\u00e4r nu.",
+  replaceBtn:"Ers\u00e4tt allt",
   statDecks:"klara kortlekar", statBest:"b\u00e4sta tid", statReps:"totalt reps",
   chartTitle:"Passtid, minuter",
   chartEmpty:"Inga klara kortlekar \u00e4n. Din f\u00f6rsta fulla kortlek startar diagrammet.",
@@ -245,6 +262,9 @@ sv: {
   paceLinger:"Det v\u00e4xte med ca {n} s i andra halvan, vilket \u00e4r vila mellan korten snarare \u00e4n l\u00e5ngsammare reps",
   paceOff:"{n} utanf\u00f6r skalan",
   exportSession:"Exportera passet (JSON)", exportLast:"Exportera senaste passet (JSON)",
+  shareSession:"Dela passet\u2026", shareLast:"Dela senaste passet\u2026",
+  shareDeck:"Dela passet", shared:"Delad.",
+  groupHint:"K\u00f6rde ni tillsammans? Dela passet s\u00e5 kan alla importera det i sin egen profil \u2014 det hamnar i historiken och flyttar fram deras cykel.",
   exportedFile:"Sparad som {f}", exportedBoth:"Sparad som {f}, och kopierad till urklipp",
   paceSlower:"Andra halvan ca {n} % l\u00e5ngsammare", paceFaster:"Andra halvan ca {n} % snabbare", paceEven:"J\u00e4mn takt hela v\u00e4gen",
   undoCard:"\u00c5ngra senaste kortet",
@@ -283,6 +303,7 @@ let showEditor = false;
 let showData = false;
 let showOptions = false;
 let dataMsg = "";
+let pendingBackup = null; // a backup waiting for the "replace everything" confirmation
 let lastResult = null;
 let lastPace = null;
 
@@ -694,6 +715,7 @@ function endEarly(saveIt){
 function resetAll(){
   store={programIndex:0, history:[], settings: defaultSettings(), lastSession:null};
   active=null; current=null; rot=0; lastResult=null; lastPace=null; confirmReset=false; screen="home";
+  pendingBackup=null; dataMsg="";
   try{ localStorage.removeItem(KEY); }catch(e){}
   render();
 }
@@ -701,8 +723,8 @@ function setConfirmEnd(v){ confirmEnd=v; renderEndZone(); }
 function setConfirmReset(v){ confirmReset=v; render(); }
 function toggleCustom(v){ showCustom=v; render(); }
 function toggleEditor(v){ showEditor=v; render(); }
-function toggleData(v){ showData=v; dataMsg=""; render(); }
-function toggleOptions(v){ showOptions=v; if(!v){ showEditor=false; showData=false; confirmReset=false; } render(); }
+function toggleData(v){ showData=v; dataMsg=""; pendingBackup=null; render(); }
+function toggleOptions(v){ showOptions=v; if(!v){ showEditor=false; showData=false; confirmReset=false; pendingBackup=null; } render(); }
 function setJokers(v){ store.settings.jokers = parseInt(v,10)||0; save(); }
 function setJokerEx(v){ store.settings.jokerEx = v.trim() || "Joker task"; save(); }
 function setLang(l){ if(l==="en"||l==="sv"){ store.settings.lang=l; save(); render(); } }
@@ -722,10 +744,16 @@ function restoreEx(){
 function goHome(){ screen="home"; render(); }
 
 // ---------- Export / import ----------
+// Two kinds of file come out of here, and the type field says which: a "backup" is everything
+// on this device and replaces what the receiver has, a "session" is one deck and is added to
+// what they already have. That distinction is the whole point of the field — a deck shared
+// round after a group session must never wipe anybody's history.
 function exportData(){
   const el = document.getElementById("dataio");
   if(!el) return;
-  const payload = JSON.stringify({programIndex:store.programIndex, history:store.history, settings:store.settings});
+  const payload = JSON.stringify({schema:"fulldeck.backup.1", type:"backup",
+    exported:new Date().toISOString(),
+    programIndex:store.programIndex, history:store.history, settings:store.settings});
   el.value = payload;
   dataMsg = t("exported");
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -733,26 +761,97 @@ function exportData(){
   }
   renderDataMsg();
 }
+// Files written before the type field carry neither, so they are read by their shape: a list
+// of sessions is a backup, and anything calling itself a fulldeck session is one deck.
+function importKind(p){
+  const schema = typeof p.schema==="string" ? p.schema : "";
+  if(p.type==="session" || schema.indexOf("fulldeck.session")===0) return "session";
+  if(p.type==="backup" || schema.indexOf("fulldeck.backup")===0) return "backup";
+  if(Array.isArray(p.history)) return "backup";
+  return null;
+}
+function importFile(input){
+  const f = input && input.files && input.files[0];
+  if(!f) return;
+  const r = new FileReader();
+  r.onload = ()=>{
+    const el = document.getElementById("dataio");
+    if(el) el.value = String(r.result||"");
+    input.value = "";                       // so the same file can be picked again after a mistake
+    importData();
+  };
+  r.onerror = ()=>{ dataMsg = t("importBad"); renderDataMsg(); };
+  r.readAsText(f);
+}
 function importData(){
   const el = document.getElementById("dataio");
   if(!el) return;
+  let p = null;
+  try{ p = JSON.parse(el.value); }catch(e){ p = null; }
+  const kind = (p && typeof p==="object") ? importKind(p) : null;
+  if(kind==="session") return importSession(p);
+  if(kind==="backup"){                      // replacing everything is asked about, adding is not
+    pendingBackup = p; dataMsg = ""; render(); return;
+  }
+  dataMsg = t("importBad");
+  renderDataMsg();
+}
+function applyBackup(){
+  const p = pendingBackup;
+  pendingBackup = null;
+  if(!p){ render(); return; }
   try{
-    const p = JSON.parse(el.value);
-    if(!p || typeof p!=="object" || !Array.isArray(p.history)) throw new Error("bad shape");
-    const hist = p.history.filter(h=>h && typeof h==="object" && typeof h.durationSec==="number" && typeof h.date==="string");
+    const hist = (Array.isArray(p.history) ? p.history : [])
+      .filter(h=>h && typeof h==="object" && typeof h.durationSec==="number" && typeof h.date==="string");
     store = {
       programIndex: [0,1,2].includes(p.programIndex) ? p.programIndex : 0,
       history: hist,
-      settings: mergeSettings(p.settings)
+      settings: mergeSettings(p.settings),
+      lastSession: null
     };
     active=null; current=null; rot=0;
     save();
     dataMsg = t("importOk");
-    render();
   }catch(e){
     dataMsg = t("importBad");
-    renderDataMsg();
   }
+  render();
+}
+function cancelBackup(){ pendingBackup=null; dataMsg=""; render(); }
+// One shared deck, read back into the plain history entry the rest of the app works in.
+function entryFromSession(p){
+  const when = typeof p.finishedAt==="string" ? p.finishedAt : (typeof p.startedAt==="string" ? p.startedAt : null);
+  const ms = when ? new Date(when).getTime() : NaN;
+  const dur = Math.round(Number(p.durationSec));
+  if(!when || !isFinite(ms) || !(dur>0)) return null;
+  const total = Math.round(Number(p.cardsTotal))>0 ? Math.round(Number(p.cardsTotal)) : 52;
+  const drawn = Math.round(Number(p.cardsDrawn))>0 ? Math.min(Math.round(Number(p.cardsDrawn)), total) : total;
+  return {date:new Date(ms).toISOString(),
+          workout:"ABC".indexOf(String(p.workout||"").toUpperCase()),  // custom decks land on -1
+          durationSec:dur, cardsDone:drawn, cardsTotal:total, completed:drawn>=total};
+}
+// The same deck can reach one phone twice — passed on by two people, or imported and then
+// imported again — and it should still only be there once. Two decks of the same workout with
+// the same time to the second, started within a minute of each other, are the same deck.
+function sameSession(a,b){
+  return a.workout===b.workout && a.durationSec===b.durationSec
+    && Math.abs(new Date(a.date).getTime() - new Date(b.date).getTime()) < 60000;
+}
+function importSession(p){
+  const e = entryFromSession(p);
+  if(!e){ dataMsg = t("importBad"); renderDataMsg(); return; }
+  if(store.history.some(h=>sameSession(h,e))){ dataMsg = t("importDup"); renderDataMsg(); return; }
+  // an imported deck can be older than decks already here, so the list is put back in order
+  const hist = store.history.concat([e]).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  let moved = null;
+  // a full A, B or C counts like finishing it yourself: the cycle moves on. Custom and
+  // abandoned decks never did, and don't here either.
+  let idx = store.programIndex;
+  if(e.completed && e.workout>=0){ idx = (e.workout+1)%3; moved = WORKOUTS[idx].letter; }
+  store = Object.assign({}, store, {history:hist, programIndex:idx});
+  save();
+  dataMsg = moved ? t("importSessionOkCycle",{l:moved}) : t("importSessionOk");
+  render();
 }
 function renderDataMsg(){ const el=document.getElementById("datamsg"); if(el) el.textContent = dataMsg; }
 
@@ -958,10 +1057,24 @@ function optionsHTML(){
       + '<button class="btn-secondary" style="flex:1" onclick="importData()">'+t("importBtn")+'</button>'
       + '<button class="btn-secondary" style="flex:0 0 90px" onclick="toggleData(false)">'+t("close")+'</button>'
       + '</div>'
-      + '<div id="datamsg" style="font-size:12px;color:var(--gold);margin-top:6px;min-height:16px">'+escapeHtml(dataMsg)+'</div>';
+      // a shared deck arrives as a file, and picking it beats pasting a screenful of JSON on a phone
+      + '<label class="btn-secondary" style="margin-top:8px">'+t("importFile")
+      + '<input type="file" accept="application/json,.json" onchange="importFile(this)"></label>';
+    if(pendingBackup){
+      const n = store.history.length;
+      h += '<div class="confirm" style="margin-top:8px;border-color:rgba(192,86,74,.6);text-align:center">'
+        + '<div style="font-size:13px">'+t("replaceConfirm",{n:n})+'</div>'
+        + '<div class="row">'
+        + '<button onclick="applyBackup()" style="background:rgba(192,86,74,.5);color:var(--cream)">'+t("replaceBtn")+'</button>'
+        + '<button onclick="cancelBackup()" style="border:1px solid rgba(246,241,227,.25);color:var(--muted)">'+t("cancel")+'</button>'
+        + '</div></div>';
+    }
+    h += '<div id="datamsg" style="font-size:12px;color:var(--gold);margin-top:6px;min-height:16px">'+escapeHtml(dataMsg)+'</div>';
   }
 
   if(store.lastSession){
+    if(canShareFiles())
+      h += '<button class="btn-secondary" style="margin-top:10px" onclick="shareLastSession()">'+t("shareLast")+'</button>';
     h += '<button class="btn-secondary" style="margin-top:10px" onclick="exportLastSession()">'+t("exportLast")+'</button>'
       + '<div id="lastmsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>';
   }
@@ -1155,16 +1268,28 @@ function endZoneHTML(){
 }
 // The whole session as it was measured: the raw draw times first, the numbers we derived from
 // them second, so a re-analysis can disagree with us.
-function exportLastSession(){
-  if(!store.lastSession) return;
+function lastSessionName(){
   let when = "", letter = "X";
   try{ const d = JSON.parse(store.lastSession); when = d.finishedAt.slice(0,10); letter = d.workout; }catch(e){}
-  exportSession(store.lastSession, "fulldeck-"+when+"-"+letter+".json", "lastmsg");
+  return "fulldeck-"+when+"-"+letter+".json";
+}
+function exportLastSession(){
+  if(!store.lastSession) return;
+  exportSession(store.lastSession, lastSessionName(), "lastmsg");
+}
+function shareLastSession(){
+  if(!store.lastSession) return;
+  shareJSON(store.lastSession, lastSessionName(), "lastmsg");
+}
+function sessionFileName(){
+  return "fulldeck-" + new Date(lastPace.end).toISOString().slice(0,10)
+       + "-" + (lastResult.workout>=0 ? WORKOUTS[lastResult.workout].letter : "X") + ".json";
 }
 function sessionExportJSON(){
   const p = lastPace, r = lastResult;
   return JSON.stringify({
-    schema: "fulldeck.session.2",
+    schema: "fulldeck.session.3",
+    type: "session",              // one deck, to be added to whatever the reader already has
     exported: new Date().toISOString(),
     workout: r.workout>=0 ? WORKOUTS[r.workout].letter : "custom",
     tag: r.workout>=0 ? t("tag"+r.workout) : t("tagCustom"),
@@ -1187,10 +1312,32 @@ function sessionExportJSON(){
     cards: p.log
   }, null, 1);
 }
+// Handing the file to whoever you just trained with is the point, so where the phone has a
+// share sheet the file goes straight into it. Everywhere else it falls back to a download.
+function canShareFiles(){
+  try{
+    return !!(navigator.share && navigator.canShare && window.File
+      && navigator.canShare({files:[new File(["{}"], "t.json", {type:"application/json"})]}));
+  }catch(e){ return false; }
+}
+function shareJSON(json, name, msgId){
+  json = json || sessionExportJSON();
+  name = name || sessionFileName();
+  const show = msg => { const el = document.getElementById(msgId||"pacemsg"); if(el) el.textContent = msg; };
+  try{
+    const file = new File([json], name, {type:"application/json"});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      navigator.share({files:[file], title:name})
+        .then(()=>show(t("shared")))
+        .catch(e=>{ if(!e || e.name!=="AbortError") exportSession(json, name, msgId); }); // cancelling is not a failure
+      return;
+    }
+  }catch(e){}
+  exportSession(json, name, msgId);
+}
 function exportSession(json, name, msgId){
   json = json || sessionExportJSON();
-  name = name || ("fulldeck-" + new Date(lastPace.end).toISOString().slice(0,10)
-             + "-" + (lastResult.workout>=0 ? WORKOUTS[lastResult.workout].letter : "X") + ".json");
+  name = name || sessionFileName();
   let saved = false;
   try{
     const url = URL.createObjectURL(new Blob([json], {type:"application/json"}));
@@ -1292,7 +1439,16 @@ function paceBoxHTML(){
     + (sprint ? sprint+'. ' : '')
     + (cont ? cont+'. ' : '')
     + t("paceHint")+'</div>'
-    + '<button class="btn-secondary" style="margin-top:12px;font-size:14px" onclick="exportSession()">'+t("exportSession")+'</button>'
+    + '</div>';
+}
+// The deck as a file, on the screen where the group is still standing together. It is its own
+// panel rather than a line in the pace box, which is not drawn at all after a very short deck.
+function shareBoxHTML(){
+  return '<div class="panel" style="width:100%;text-align:left;margin-top:14px">'
+    + '<div class="eyebrow" style="margin-bottom:6px">'+t("shareDeck")+'</div>'
+    + '<div style="font-size:11px;color:var(--muted);line-height:1.4;margin-bottom:10px">'+t("groupHint")+'</div>'
+    + (canShareFiles() ? '<button class="btn-secondary" style="font-size:14px" onclick="shareJSON()">'+t("shareSession")+'</button>' : '')
+    + '<button class="btn-secondary" style="margin-top:8px;font-size:14px" onclick="exportSession()">'+t("exportSession")+'</button>'
     + '<div id="pacemsg" style="font-size:11px;color:var(--gold);margin-top:6px;min-height:14px"></div>'
     + '<textarea id="paceio" spellcheck="false" style="display:none;height:120px"></textarea>'
     + '</div>';
@@ -1312,6 +1468,7 @@ function doneHTML(){
     + '<div class="slab" style="font-size:54px;line-height:1">'+fmtTime(lastResult.durationSec)+'</div>'
     + '<div style="color:var(--muted);font-size:13px;margin-top:6px">'+(isBest?t("newBest"):t("timeSaved"))+'</div>'
     + paceBoxHTML()
+    + shareBoxHTML()
     + '<div style="background:rgba(246,241,227,.06);border-radius:12px;padding:12px 16px;margin:32px 0 24px;font-size:14px">'+t("upNextShort")+' <span class="slab" style="color:'+nw.color+'">'+t("workoutN",{l:nw.letter})+'</span> \u00b7 '+t("tag"+store.programIndex)+'</div>'
     + '<button class="btn-primary" onclick="goHome()">'+t("back")+'</button>'
     + '</div>';
