@@ -128,9 +128,16 @@ label.btn-secondary:focus-within{outline:2px solid var(--gold);outline-offset:2p
 "use strict";
 // ---------- Constants ----------
 const KEY = "fulldeck:v1";
+// The card by card record of every deck, kept apart from the store above because that one is
+// written on every single draw and this one only when a deck ends. A deck is 804 bytes of it,
+// so three a week for ten years is about 1.2 MB against a budget of five — the room is there,
+// and what is not written down now cannot be looked at later. Six hundred decks is the cap,
+// four years at three a week, and the oldest go first.
+const LOGKEY = "fulldeck:logs:v1";
+const LOG_KEEP = 600;
 // Printed at the foot of the options, so which build a phone is actually running is a question
 // with an answer. Keep it in step with the cache name in sw.js.
-const BUILD = "v36";
+const BUILD = "v37";
 const SUITS = ["\u2660","\u2665","\u2666","\u2663"]; // spade heart diamond club
 const RED_SUITS = new Set(["\u2665","\u2666"]);
 const JOKER_STAR = "\u2605";
@@ -175,7 +182,8 @@ en: {
   restoreDefaults:"Restore defaults",
   dataBtn:"Export / import data",
   dataDesc:"Copy this text to back up or move your data to another device. Paste a backup here to restore everything, or a single deck export to add just that deck to your history.",
-  exportBtn:"Export", importBtn:"Import", importFile:"Choose file\u2026",
+  exportBtn:"Export", importBtn:"Import", importFile:"Choose file\u2026", exportFileBtn:"Save as file",
+  cardDataLine:"Card by card, {n} decks are kept here \u2014 {k} kB. They travel with a backup.",
   copied:"Exported \u2014 copied to clipboard.", exported:"Exported \u2014 copy the text above.",
   importOk:"Data imported.", importBad:"Couldn\u2019t read that data \u2014 nothing was changed.",
   importSessionOk:"Deck added to your history.",
@@ -241,7 +249,8 @@ sv: {
   restoreDefaults:"\u00c5terst\u00e4ll standard",
   dataBtn:"Exportera / importera data",
   dataDesc:"Kopiera texten f\u00f6r att s\u00e4kerhetskopiera eller flytta din data till en annan enhet. Klistra in en s\u00e4kerhetskopia f\u00f6r att \u00e5terst\u00e4lla allt, eller ett exporterat pass f\u00f6r att bara l\u00e4gga till det passet i din historik.",
-  exportBtn:"Exportera", importBtn:"Importera", importFile:"V\u00e4lj fil\u2026",
+  exportBtn:"Exportera", importBtn:"Importera", importFile:"V\u00e4lj fil\u2026", exportFileBtn:"Spara som fil",
+  cardDataLine:"Kort f\u00f6r kort finns {n} pass sparade h\u00e4r \u2014 {k} kB. De f\u00f6ljer med en s\u00e4kerhetskopia.",
   copied:"Exporterad \u2014 kopierad till urklipp.", exported:"Exporterad \u2014 kopiera texten ovan.",
   importOk:"Data importerad.", importBad:"Kunde inte l\u00e4sa datan \u2014 inget \u00e4ndrades.",
   importSessionOk:"Passet \u00e4r tillagt i din historik.",
@@ -371,6 +380,53 @@ function save(){
     localStorage.setItem(KEY, JSON.stringify({programIndex:store.programIndex, history:store.history,
       settings:store.settings, lastSession:store.lastSession||null, active:active}));
   }catch(e){ console.error("Could not save", e); }
+}
+
+// ---------- The card log (per deck, written once when the deck ends) ----------
+function loadLogs(){
+  try{
+    const raw = localStorage.getItem(LOGKEY);
+    if(!raw) return [];
+    const p = JSON.parse(raw);
+    return (p && Array.isArray(p.sessions)) ? p.sessions : [];
+  }catch(e){ return []; }
+}
+function logsBytes(){
+  try{ const raw = localStorage.getItem(LOGKEY); return raw ? raw.length : 0; }catch(e){ return 0; }
+}
+// A full disk must never cost you the deck you have just done, so a write that will not fit
+// drops the oldest half and tries again rather than failing.
+function writeLogs(sessions){
+  let list = sessions.slice(-LOG_KEEP);
+  for(let attempt=0; attempt<4; attempt++){
+    try{
+      localStorage.setItem(LOGKEY, JSON.stringify({schema:"fulldeck.logs.1", sessions:list}));
+      return true;
+    }catch(e){
+      if(!list.length) return false;
+      list = list.slice(Math.ceil(list.length/2));
+    }
+  }
+  return false;
+}
+// One row per card as it was drawn: suit, reps, and the seconds until the next one. A joker
+// carries a task rather than reps and comes through as a suitless row. Exercise names are
+// written down with the deck because the editor can rename them afterwards, and a rate is
+// meaningless against a name that has since moved to another exercise.
+function logRecord(pace, entry){
+  const cards = pace.log.map(c=>[c.suit || null, c.reps || 0, c.sec==null ? null : +Number(c.sec).toFixed(1)]);
+  const rec = {date:entry.date, workout: entry.workout>=0 ? WORKOUTS[entry.workout].letter : "custom",
+               completed: !!entry.completed, durationSec: entry.durationSec,
+               ex: Object.assign({}, pace.ex), cards: cards};
+  if(pace.jokerTask) rec.joker = pace.jokerTask;
+  return rec;
+}
+function logSession(pace, entry){
+  if(!pace || !Array.isArray(pace.log) || !pace.log.length || !entry) return;
+  const list = loadLogs();
+  if(list.some(x=>x && x.date===entry.date)) return;   // the same deck is only written once
+  list.push(logRecord(pace, entry));
+  writeLogs(list);
 }
 
 // ---------- Helpers ----------
@@ -699,6 +755,7 @@ function finishDeck(){
   lastPace = sessionPace(Date.now()); // shown once on the done screen; never written to history
   const entry = {date:new Date().toISOString(), workout:active.workoutIdx, durationSec,
                  cardsDone:active.drawn, cardsTotal:active.total, completed:true};
+  logSession(lastPace, entry);
   const nextIdx = active.workoutIdx>=0 ? (active.workoutIdx+1)%3 : store.programIndex; // custom decks don't advance the cycle
   store = Object.assign({}, store, {programIndex:nextIdx, history:store.history.concat([entry])});
   active=null; lastResult=entry;
@@ -711,8 +768,10 @@ function endEarly(saveIt){
   if(!active) return;
   if(saveIt && active.drawn>0){
     const durationSec = Math.max(1, elapsed());
-    store = Object.assign({}, store, {history:store.history.concat([{date:new Date().toISOString(), workout:active.workoutIdx,
-      durationSec, cardsDone:active.drawn, cardsTotal:active.total, completed:false}])});
+    const entry = {date:new Date().toISOString(), workout:active.workoutIdx,
+      durationSec, cardsDone:active.drawn, cardsTotal:active.total, completed:false};
+    logSession(sessionPace(Date.now()), entry);   // half a deck is still cards that were drawn
+    store = Object.assign({}, store, {history:store.history.concat([entry])});
   }
   active=null; current=null; rot=0; confirmEnd=false;
   save(); screen="home"; render();
@@ -721,7 +780,7 @@ function resetAll(){
   store={programIndex:0, history:[], settings: defaultSettings(), lastSession:null};
   active=null; current=null; rot=0; lastResult=null; lastPace=null; confirmReset=false; screen="home";
   pendingBackup=null; dataMsg="";
-  try{ localStorage.removeItem(KEY); }catch(e){}
+  try{ localStorage.removeItem(KEY); localStorage.removeItem(LOGKEY); }catch(e){}
   render();
 }
 function setConfirmEnd(v){ confirmEnd=v; renderEndZone(); }
@@ -753,12 +812,22 @@ function goHome(){ screen="home"; render(); }
 // on this device and replaces what the receiver has, a "session" is one deck and is added to
 // what they already have. That distinction is the whole point of the field — a deck shared
 // round after a group session must never wipe anybody's history.
+function backupJSON(){
+  return JSON.stringify({schema:"fulldeck.backup.2", type:"backup",
+    exported:new Date().toISOString(),
+    programIndex:store.programIndex, history:store.history, settings:store.settings,
+    logs:loadLogs()});
+}
+function backupFileName(){
+  return "fulldeck-backup-" + new Date().toISOString().slice(0,10) + ".json";
+}
+// The card logs make a backup far too long to read off a screen and retype, so it can be had
+// as a file as well as text.
+function exportDataFile(){ exportSession(backupJSON(), backupFileName(), "datamsg"); }
 function exportData(){
   const el = document.getElementById("dataio");
   if(!el) return;
-  const payload = JSON.stringify({schema:"fulldeck.backup.1", type:"backup",
-    exported:new Date().toISOString(),
-    programIndex:store.programIndex, history:store.history, settings:store.settings});
+  const payload = backupJSON();
   el.value = payload;
   dataMsg = t("exported");
   if(navigator.clipboard && navigator.clipboard.writeText){
@@ -815,6 +884,7 @@ function applyBackup(){
       lastSession: null
     };
     active=null; current=null; rot=0;
+    if(Array.isArray(p.logs)) writeLogs(p.logs);   // a backup without them leaves what is here alone
     save();
     dataMsg = t("importOk");
   }catch(e){
@@ -847,6 +917,10 @@ function importSession(p){
   if(!e){ dataMsg = t("importBad"); renderDataMsg(); return; }
   if(store.history.some(h=>sameSession(h,e))){ dataMsg = t("importDup"); renderDataMsg(); return; }
   // an imported deck can be older than decks already here, so the list is put back in order
+  // a full export brings its cards with it, so a deck done together is card for card on
+  // everybody's phone, not just the sharer's
+  if(Array.isArray(p.cards) && p.cards.length)
+    logSession({log:p.cards, ex:p.exercises || {}, jokerTask:p.jokerTask}, e);
   const hist = store.history.concat([e]).sort((a,b)=>new Date(a.date)-new Date(b.date));
   let moved = null;
   // a full A, B or C counts like finishing it yourself: the cycle moves on. Custom and
@@ -1062,9 +1136,16 @@ function optionsHTML(){
       + '<button class="btn-secondary" style="flex:1" onclick="importData()">'+t("importBtn")+'</button>'
       + '<button class="btn-secondary" style="flex:0 0 90px" onclick="toggleData(false)">'+t("close")+'</button>'
       + '</div>'
+      + '<div style="display:flex;gap:8px;margin-top:8px">'
+      + '<button class="btn-secondary" style="flex:1" onclick="exportDataFile()">'+t("exportFileBtn")+'</button>'
       // a shared deck arrives as a file, and picking it beats pasting a screenful of JSON on a phone
-      + '<label class="btn-secondary" style="margin-top:8px">'+t("importFile")
-      + '<input type="file" accept="application/json,.json" onchange="importFile(this)"></label>';
+      + '<label class="btn-secondary" style="flex:1;margin:0">'+t("importFile")
+      + '<input type="file" accept="application/json,.json" onchange="importFile(this)"></label>'
+      + '</div>';
+    const logs = loadLogs();
+    if(logs.length)
+      h += '<div style="font-size:11px;color:var(--muted);margin-top:8px">'
+        + t("cardDataLine",{n:logs.length, k:Math.max(1, Math.round(logsBytes()/1024))})+'</div>';
     if(pendingBackup){
       const n = store.history.length;
       h += '<div class="confirm" style="margin-top:8px;border-color:rgba(192,86,74,.6);text-align:center">'
