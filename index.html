@@ -137,7 +137,7 @@ const LOGKEY = "fulldeck:logs:v1";
 const LOG_KEEP = 600;
 // Printed at the foot of the options, so which build a phone is actually running is a question
 // with an answer. Keep it in step with the cache name in sw.js.
-const BUILD = "v37";
+const BUILD = "v38";
 const SUITS = ["\u2660","\u2665","\u2666","\u2663"]; // spade heart diamond club
 const RED_SUITS = new Set(["\u2665","\u2666"]);
 const JOKER_STAR = "\u2605";
@@ -183,6 +183,8 @@ en: {
   dataBtn:"Export / import data",
   dataDesc:"Copy this text to back up or move your data to another device. Paste a backup here to restore everything, or a single deck export to add just that deck to your history.",
   exportBtn:"Export", importBtn:"Import", importFile:"Choose file\u2026", exportFileBtn:"Save as file",
+  exercisesWord:"Exercises", showAll:"Show all {n}", showFewer:"Show fewer", timeWord:"time",
+  noCardData:"This deck was done before the cards were kept card by card, so there is nothing here beyond the time. Decks from now on have all of it.",
   cardDataLine:"Card by card, {n} decks are kept here \u2014 {k} kB. They travel with a backup.",
   copied:"Exported \u2014 copied to clipboard.", exported:"Exported \u2014 copy the text above.",
   importOk:"Data imported.", importBad:"Couldn\u2019t read that data \u2014 nothing was changed.",
@@ -250,6 +252,8 @@ sv: {
   dataBtn:"Exportera / importera data",
   dataDesc:"Kopiera texten f\u00f6r att s\u00e4kerhetskopiera eller flytta din data till en annan enhet. Klistra in en s\u00e4kerhetskopia f\u00f6r att \u00e5terst\u00e4lla allt, eller ett exporterat pass f\u00f6r att bara l\u00e4gga till det passet i din historik.",
   exportBtn:"Exportera", importBtn:"Importera", importFile:"V\u00e4lj fil\u2026", exportFileBtn:"Spara som fil",
+  exercisesWord:"\u00d6vningar", showAll:"Visa alla {n}", showFewer:"Visa f\u00e4rre", timeWord:"tid",
+  noCardData:"Det h\u00e4r passet k\u00f6rdes innan korten sparades kort f\u00f6r kort, s\u00e5 h\u00e4r finns inget mer \u00e4n tiden. Pass h\u00e4rifr\u00e5n och fram\u00e5t har allt.",
   cardDataLine:"Kort f\u00f6r kort finns {n} pass sparade h\u00e4r \u2014 {k} kB. De f\u00f6ljer med en s\u00e4kerhetskopia.",
   copied:"Exporterad \u2014 kopierad till urklipp.", exported:"Exporterad \u2014 kopiera texten ovan.",
   importOk:"Data importerad.", importBad:"Kunde inte l\u00e4sa datan \u2014 inget \u00e4ndrades.",
@@ -320,6 +324,8 @@ let dataMsg = "";
 let pendingBackup = null; // a backup waiting for the "replace everything" confirmation
 let lastResult = null;
 let lastPace = null;
+let viewSession = null;   // the history entry being looked at again
+let histAll = false;      // the history list, past the eight most recent
 
 // ---------- Persistence (on-device) ----------
 function validExercises(x){
@@ -414,7 +420,9 @@ function writeLogs(sessions){
 // written down with the deck because the editor can rename them afterwards, and a rate is
 // meaningless against a name that has since moved to another exercise.
 function logRecord(pace, entry){
-  const cards = pace.log.map(c=>[c.suit || null, c.reps || 0, c.sec==null ? null : +Number(c.sec).toFixed(1)]);
+  // the same hundredths the deck was measured in, so reading it back gives the numbers you
+  // were shown on the night rather than nearly them
+  const cards = pace.log.map(c=>[c.suit || null, c.reps || 0, c.sec==null ? null : +Number(c.sec).toFixed(2)]);
   const rec = {date:entry.date, workout: entry.workout>=0 ? WORKOUTS[entry.workout].letter : "custom",
                completed: !!entry.completed, durationSec: entry.durationSec,
                ex: Object.assign({}, pace.ex), cards: cards};
@@ -677,33 +685,25 @@ function cardOverhead(fit, card){
 //
 // It is bought with precision: half the cards behind each number. The drift is only worth
 // printing past twenty per cent, which is where the false alarms fall to one deck in ten.
-function sessionPace(endEpoch){
-  if(!active || !Array.isArray(active.drawnAt)) return null;
+//
+// It works from the card log rather than the session in progress, so the deck you look at in
+// March is read by the same code that read it in January.
+function paceOfLog(log, ex, jokerTask){
   const timed = [];
   let reps = 0;
-  for(let i=0; i<active.drawnCards.length; i++){
-    const card = active.drawnCards[i];
-    if(card.joker) continue;
-    reps += card.v;
-    const from = active.drawnAt[i];
-    const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
-    if(from==null || to==null || to<=from) continue;
+  for(let i=0; i<log.length; i++){
+    const card = log[i];
+    if(!card.suit) continue;                       // a joker carries a task, not reps
+    reps += card.reps;
+    if(card.sec==null || !(card.sec>0)) continue;  // a card whose length nobody knows
     // reps on the card just finished — nothing to recover from before the first card, and a
     // joker's task is untimed work of unknown size, so neither one is charged
-    const was = i>0 ? active.drawnCards[i-1] : null;
-    timed.push({n:i+1, s:card.s, v:card.v, prev:(was && !was.joker) ? was.v : 0,
-                same:!!(was && !was.joker && was.s===card.s), dur:(to-from)/1000});
+    const was = i>0 ? log[i-1] : null;
+    timed.push({n:i+1, s:card.suit, v:card.reps, prev:(was && was.suit) ? was.reps : 0,
+                same:!!(was && was.suit && was.suit===card.suit), dur:card.sec});
   }
-  const cards = active.drawnCards.length;
-  // every card as drawn, jokers included, for the export
-  const log = active.drawnCards.map((card,i)=>{
-    const from = active.drawnAt[i];
-    const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
-    return {n:i+1, suit:card.joker?null:card.s, reps:card.joker?0:card.v, at:from||null,
-            sec:(from!=null && to!=null && to>from) ? +((to-from)/1000).toFixed(2) : null};
-  });
-  const common = {cards:cards, log:log, ex:Object.assign({}, active.ex), jokerTask:active.jokerEx,
-                  start:active.startEpoch, end:endEpoch};
+  const cards = log.length;
+  const common = {cards:cards, log:log, ex:Object.assign({}, ex), jokerTask:jokerTask};
   const cut = Math.ceil(cards/2);
   if(!timed.length) return Object.assign({reps:reps, rows:[], points:[], cut:cut,
                                           setup:0, sprint:0, cont:0, fits:[]}, common);
@@ -740,14 +740,41 @@ function sessionPace(endEpoch){
   const points = timed.map(c=>({n:c.n, s:c.s, v:c.v,
     spr:Math.max(0,(c.dur-cardOverhead(fitFor(c),c))/c.v)}));
   const rows = SUITS.filter(s=>timed.some(c=>c.s===s)).map(s=>({
-    suit:s, ex:active.ex[s], cards:timed.filter(c=>c.s===s).length,
+    suit:s, ex:ex[s], cards:timed.filter(c=>c.s===s).length,
     perRep:wmedian(points.filter(p=>p.s===s).map(p=>[p.spr, p.v])),
-    reps:active.drawnCards.reduce((n,c)=>n+(!c.joker&&c.s===s?c.v:0), 0)
+    reps:log.reduce((n,c)=>n+(c.suit===s?c.reps:0), 0)
   }));
   const ohAll = median(timed.map(c=>cardOverhead(fitFor(c), c)));
   const sprint = split ? median(late.map(c=>cardOverhead(fitB,c))) - median(early.map(c=>cardOverhead(fitA,c))) : 0;
   return Object.assign({reps:reps, rows:rows, points:points, cut:cut, setup:ohAll, sprint:sprint,
                         cont:fits[0].cont, fits:fits}, common);
+}
+// The deck in progress, turned into that same log: every card as drawn, jokers included, timed
+// from the moment it was drawn until the next one was. The seconds are rounded here rather than
+// afterwards, so what is written down and what is shown are the same numbers.
+function sessionPace(endEpoch){
+  if(!active || !Array.isArray(active.drawnAt)) return null;
+  const log = active.drawnCards.map((card,i)=>{
+    const from = active.drawnAt[i];
+    const to = i+1 < active.drawnAt.length ? active.drawnAt[i+1] : endEpoch;
+    return {n:i+1, suit:card.joker?null:card.s, reps:card.joker?0:card.v, at:from||null,
+            sec:(from!=null && to!=null && to>from) ? +((to-from)/1000).toFixed(2) : null};
+  });
+  return Object.assign(paceOfLog(log, active.ex, active.jokerEx),
+                       {start:active.startEpoch, end:endEpoch});
+}
+// A deck read back off the shelf: the stored rows are [suit, reps, seconds].
+function paceOfRecord(rec){
+  if(!rec || !Array.isArray(rec.cards) || !rec.cards.length) return null;
+  const log = rec.cards.map((c,i)=>({n:i+1, suit:c[0]||null, reps:c[1]||0, at:null,
+                                     sec:(typeof c[2]==="number") ? c[2] : null}));
+  return paceOfLog(log, rec.ex || {}, rec.joker || null);
+}
+function logFor(entry){
+  if(!entry) return null;
+  const list = loadLogs();
+  for(let i=0;i<list.length;i++) if(list[i] && list[i].date===entry.date) return list[i];
+  return null;
 }
 function finishDeck(){
   if(!active) return;
@@ -805,7 +832,14 @@ function restoreEx(){
   store.settings.exercises = DEFAULT_EX.map(a=>a.slice());
   save(); render();
 }
-function goHome(){ screen="home"; render(); }
+function goHome(){ screen="home"; viewSession=null; render(); }
+function toggleHistAll(){ histAll = !histAll; render(); }
+function openSession(i){
+  const e = store.history[i];
+  if(!e) return;
+  viewSession = e; screen="session"; render();
+  try{ window.scrollTo(0,0); }catch(err){}
+}
 
 // ---------- Export / import ----------
 // Two kinds of file come out of here, and the type field says which: a "backup" is everything
@@ -1061,17 +1095,23 @@ function homeHTML(){
     + '<span style="font-size:11px;color:var(--muted)"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:'+CUSTOM_COLOR+';margin-right:4px"></span>'+t("tagCustom")+'</span>'
     + '</div></div>';
 
-  // History
+  // History. Every row opens the deck it stands for, so the eight most recent are a list to
+  // read and the rest are a tap away rather than gone.
   if(store.history.length>0){
+    const rows = store.history.map((x,i)=>[x,i]).reverse();
+    const shown = histAll ? rows : rows.slice(0,8);
     h += '<div class="panel"><div class="eyebrow" style="margin-bottom:6px">'+t("history")+'</div>'
-      + store.history.slice().reverse().slice(0,8).map(x=>{
-          const m=entryMeta(x);
-          return '<div class="histrow" style="opacity:'+(x.completed?1:.5)+'">'
+      + shown.map(pair=>{
+          const x = pair[0], m = entryMeta(x);
+          return '<button class="histrow" onclick="openSession('+pair[1]+')" style="width:100%;opacity:'+(x.completed?1:.5)+'">'
             + '<span><span class="slab" style="color:'+m.color+';font-size:13px">'+m.letter+'</span>&nbsp; '
             + new Date(x.date).toLocaleDateString(store.settings.lang==="sv"?"sv-SE":undefined)
             + (x.completed?'':' <span style="color:var(--muted)">\u00b7 '+t("endedAt")+' '+x.cardsDone+'/'+(x.cardsTotal||52)+'</span>')
-            + '</span><span style="color:var(--muted)">'+fmtTime(x.durationSec)+'</span></div>';
+            + '</span><span style="color:var(--muted)">'+fmtTime(x.durationSec)+' \u203a</span></button>';
         }).join('')
+      + (rows.length>8 ? '<div style="text-align:center;margin-top:8px">'
+          + '<button class="linkbtn" onclick="toggleHistAll()">'
+          + (histAll ? t("showFewer") : t("showAll",{n:rows.length}))+'</button></div>' : '')
       + '</div>';
   }
 
@@ -1463,9 +1503,8 @@ function exportSession(json, name, msgId){
 }
 // one colour per suit, distinct against the felt; ordered like SUITS
 const PACE_COLORS = ["#9DB8A8","#E06055","#C9A227","#8F9FBC"];
-function paceBoxHTML(){
-  if(!lastPace || !lastPace.points.length) return '';
-  const p = lastPace;
+function paceBoxHTML(p){
+  if(!p || !p.points || !p.points.length) return '';
   const W=360, H=150, padL=8, padR=8, padT=16, padB=20;
   const sorted = p.points.map(q=>q.spr).sort((a,b)=>a-b);
   // A long rest lands on one card and would flatten everything else, so the scale spans the
@@ -1559,6 +1598,52 @@ function shareBoxHTML(){
     + '<textarea id="paceio" spellcheck="false" style="display:none;height:120px"></textarea>'
     + '</div>';
 }
+// One deck from the history, read again. Everything here comes off the card log written when
+// the deck ended, so decks from before that was kept show what the history entry knows and say
+// plainly that the cards themselves were not written down.
+function sessionHTML(){
+  const e = viewSession;
+  const m = entryMeta(e);
+  const rec = logFor(e);
+  const pace = paceOfRecord(rec);
+  const when = new Date(e.date);
+  const loc = store.settings.lang==="sv" ? "sv-SE" : undefined;
+  const title = e.workout>=0 ? t("workoutN",{l:m.letter}) : t("customDeck");
+  const tag = e.workout>=0 ? t("tag"+e.workout) : t("tagCustom");
+  const reps = pace ? pace.reps : null;
+  let h = '<div class="workwrap">'
+    + '<div style="width:100%;display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">'
+    + '<div><div class="slab" style="font-size:24px;color:'+m.color+'">'+title+'</div>'
+    + '<div class="eyebrow" style="font-size:11px">'+tag+'</div></div>'
+    + '<div style="text-align:right;font-size:12px;color:var(--muted)">'
+    + when.toLocaleDateString(loc)+'<br>'+when.toLocaleTimeString(loc,{hour:"2-digit",minute:"2-digit"})+'</div></div>'
+    + '<div class="statgrid" style="width:100%">'
+    + '<div class="stat"><div class="v">'+fmtTime(e.durationSec)+'</div><div class="l">'+t("timeWord")+'</div></div>'
+    + '<div class="stat"><div class="v">'+e.cardsDone+(e.completed?'':'/'+(e.cardsTotal||52))+'</div><div class="l">'+t("cardsWord")+'</div></div>'
+    + '<div class="stat"><div class="v">'+(reps==null?'—':reps)+'</div><div class="l">'+t("repsWord")+'</div></div>'
+    + '</div>';
+  if(rec && rec.ex && SUITS.some(s=>rec.ex[s])){
+    h += '<div class="panel" style="width:100%">'
+      + '<div class="eyebrow" style="margin-bottom:8px">'+t("exercisesWord")+'</div>'
+      + '<div class="suitlist">'
+      + SUITS.filter(s=>rec.ex[s]).map(s=>{
+          const row = pace && pace.rows.filter(r=>r.suit===s)[0];
+          return '<div class="suitrow"><span style="font-size:16px;color:'+suitColor(s,true)+'">'+s+'</span>'
+            + '<span class="ex">'+escapeHtml(rec.ex[s])+'</span>'
+            + (row ? '<span class="slab" style="font-size:13px">'+row.reps+'</span>'
+                   + '<span style="font-size:10px;color:var(--muted)">'+t("repsWord")+'</span>' : '')
+            + '</div>';
+        }).join('')
+      + (rec.joker ? '<div class="suitrow"><span style="font-size:16px;color:var(--gold)">'+JOKER_STAR+'</span>'
+          + '<span class="ex">'+escapeHtml(rec.joker)+'</span></div>' : '')
+      + '</div></div>';
+  }
+  h += pace ? paceBoxHTML(pace)
+     : '<div class="panel" style="width:100%;font-size:12px;color:var(--muted);line-height:1.4">'+t("noCardData")+'</div>';
+  h += '<button class="btn-primary" style="margin-top:22px" onclick="goHome()">'+t("back")+'</button>'
+    + '</div>';
+  return h;
+}
 function doneHTML(){
   const completed = store.history.filter(h=>h.completed);
   const best = completed.length ? Math.min.apply(null, completed.map(h=>h.durationSec)) : null;
@@ -1573,7 +1658,7 @@ function doneHTML(){
     + '<div style="color:var(--muted);font-size:14px;margin-bottom:24px">'+title+' \u00b7 '+(lastResult.cardsTotal||52)+' '+t("cardsWord")+' \u00b7 '+((lastPace&&lastPace.reps)||416)+' '+t("repsWord")+'</div>'
     + '<div class="slab" style="font-size:54px;line-height:1">'+fmtTime(lastResult.durationSec)+'</div>'
     + '<div style="color:var(--muted);font-size:13px;margin-top:6px">'+(isBest?t("newBest"):t("timeSaved"))+'</div>'
-    + paceBoxHTML()
+    + paceBoxHTML(lastPace)
     + shareBoxHTML()
     + '<div style="background:rgba(246,241,227,.06);border-radius:12px;padding:12px 16px;margin:32px 0 24px;font-size:14px">'+t("upNextShort")+' <span class="slab" style="color:'+nw.color+'">'+t("workoutN",{l:nw.letter})+'</span> \u00b7 '+t("tag"+store.programIndex)+'</div>'
     + '<button class="btn-primary" onclick="goHome()">'+t("back")+'</button>'
@@ -1583,10 +1668,11 @@ function doneHTML(){
 function render(){
   const root = document.getElementById("app");
   try{
-    root.innerHTML = screen==="home" ? homeHTML() : screen==="workout" ? workoutHTML() : doneHTML();
+    root.innerHTML = screen==="home" ? homeHTML() : screen==="workout" ? workoutHTML()
+                   : screen==="session" ? sessionHTML() : doneHTML();
   }catch(e){
     console.error("Render failed, recovering:", e);
-    active=null; current=null; rot=0; screen="home";
+    active=null; current=null; rot=0; screen="home"; viewSession=null;
     try{ root.innerHTML = homeHTML(); }
     catch(e2){ root.innerHTML = '<div style="padding:40px;text-align:center">Something went wrong loading saved data.<br><br><button onclick="resetAll()" style="text-decoration:underline;color:#C9A227">Reset all data</button></div>'; }
   }
